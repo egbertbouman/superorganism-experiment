@@ -11,7 +11,7 @@ import pathlib
 
 from flask import Flask, request, jsonify
 
-BIND_HOST = "127.0.0.1"
+BIND_HOST = "0.0.0.0"  # bind to lxdbr0 too so containers can POST events from the bridge
 BIND_PORT = 8765
 EVENTS_FILE = pathlib.Path(__file__).resolve().parent / "data" / "events.jsonl"
 # Matches what the bootstrapper writes to ~/.mycelium/log_secret and injects as

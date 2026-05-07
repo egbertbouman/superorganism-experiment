@@ -8,14 +8,94 @@ persists mnemonic to disk (chmod 600), and removes the env var from
 
 import logging
 import os
+import threading
 import time
+from decimal import Decimal
+from functools import wraps
 from pathlib import Path
 from typing import Optional, Tuple
 
 from bitcoinlib.wallets import Wallet
+import bitcoinlib.db as _bitcoinlib_db
 
 from config import Config
 from utils import setup_logger
+
+# bitcoinlib creates its SQLAlchemy engine inside Db.__init__  the
+# sqlite session is bound to the creatingthread.
+# NodeMonitor.refresh runs on a ThreadPoolExecutor (asyncio.to_thread)
+# bitcoinlib.db.create_engine adds check_same_thread=False;
+_orig_create_engine = _bitcoinlib_db.create_engine
+
+def _create_engine_thread_safe(url, *args, **kwargs):
+    if isinstance(url, str) and url.startswith("sqlite:"):
+        kwargs.setdefault("connect_args", {}).setdefault("check_same_thread", False)
+    return _orig_create_engine(url, *args, **kwargs)
+
+_bitcoinlib_db.create_engine = _create_engine_thread_safe
+
+
+# Sim-only electrumx patches. Production uses HTTP providers and never hits these.
+if Config.SIM_MODE:
+    import asyncio as _asyncio
+    import socket as _socket
+    try:
+        import aiorpcx as _aiorpcx
+    except ImportError:
+        _aiorpcx = None
+
+    if _aiorpcx is not None:
+        # ElectrumxClient.compose_request uses asyncio.get_event_loop() which fails
+        # under asyncio.to_thread workers — every scan surfaces as ServiceError.
+        from bitcoinlib.services.electrumx import ElectrumxClient as _ElectrumxClient
+        from bitcoinlib.services.baseclient import ClientError as _ClientError
+
+        def _electrumx_compose_request_thread_safe(self, method, parameters=None):
+            try:
+                host, port = self.base_url.split(':')
+            except ValueError:
+                raise _ClientError('Please specify ElectrumX uri in format host:port')
+            parameters = parameters or []
+            probe = _socket.socket(_socket.AF_INET, _socket.SOCK_STREAM)
+            probe.settimeout(2)
+            try:
+                if probe.connect_ex((host, int(port))) != 0:
+                    raise _ClientError('ElectrumX server %s unavailable at port %s' % (host, port))
+            finally:
+                probe.close()
+
+            async def _send():
+                async with _aiorpcx.connect_rs(host, int(port),
+                                               framer=_aiorpcx.NewlineFramer(5000000)) as session:
+                    session.sent_request_timeout = self.timeout
+                    return await session.send_request(method, parameters)
+
+            loop = _asyncio.new_event_loop()
+            try:
+                return loop.run_until_complete(_send())
+            finally:
+                loop.close()
+
+        _ElectrumxClient.compose_request = _electrumx_compose_request_thread_safe
+
+    # _parse_transaction does tx['confirmations'] which KeyErrors on mempool txs.
+    from bitcoinlib.services.electrumx import ElectrumxClient as _EC2  # noqa: E402
+    _orig_parse_transaction = _EC2._parse_transaction
+    def _parse_transaction_safe(self, tx, *args, **kwargs):
+        tx.setdefault("confirmations", 0)
+        return _orig_parse_transaction(self, tx, *args, **kwargs)
+    _EC2._parse_transaction = _parse_transaction_safe
+
+
+_wallet_lock = threading.RLock()
+
+
+def _synchronized(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        with _wallet_lock:
+            return fn(*args, **kwargs)
+    return wrapper
 
 logger = setup_logger(
     __name__,
@@ -35,15 +115,16 @@ def parse_bitcoin_uri(uri: str) -> Optional[Tuple[str, int]]:
         return None
     parts = uri[8:].split("?")
     address = parts[0]
-    amount_btc = None
+    amount_btc_str = None
     if len(parts) > 1:
         for param in parts[1].split("&"):
             if param.startswith("amount="):
-                amount_btc = float(param[7:])
+                amount_btc_str = param[7:]
                 break
-    if not address or amount_btc is None:
+    if not address or amount_btc_str is None:
         return None
-    return address, int(amount_btc * 100_000_000)
+    # Decimal avoids float imprecision: int(float("0.0006") * 1e8) truncates to 59999.
+    return address, int(Decimal(amount_btc_str) * 100_000_000)
 
 
 def _remove_from_etc_environment(key: str) -> None:
@@ -74,28 +155,40 @@ class SpendingWallet:
     def __init__(self, wallet: Wallet):
         self._wallet = wallet
 
+    @_synchronized
     def get_receiving_address(self) -> str:
         """Get a receiving address for this wallet."""
         key = self._wallet.get_key()
         return key.address
 
+    @_synchronized
     def get_balance_satoshis(self) -> int:
         """Get confirmed balance in satoshis."""
         return self._wallet.balance()
 
+    @_synchronized
     def get_balance_btc(self) -> float:
         """Get confirmed balance in BTC."""
         return self.get_balance_satoshis() / 100_000_000
 
+    @_synchronized
     def scan(self) -> None:
         """Scan blockchain for transactions and update balance."""
         logger.info("Scanning blockchain for transactions...")
         self._wallet.scan()
         logger.info("Scan complete. Balance: %s BTC", self.get_balance_btc())
 
+    @_synchronized
     def send(self, address: str, amount_satoshis: int, fee=None) -> str:
         """Send Bitcoin to address. Returns txid."""
-        from bitcoinlib.services.services import Service
+        if Config.SIM_MODE:
+            # Sim issues many sends per minute; resync local UTXO table so coin
+            # selection doesn't pick inputs already consumed by an earlier send.
+            try:
+                self._wallet.transactions_update()
+                self._wallet.utxos_update()
+            except Exception as e:
+                logger.warning("wallet refresh before send failed (continuing): %s", e)
 
         balance = self.get_balance_satoshis()
         if balance < amount_satoshis:
@@ -105,20 +198,28 @@ class SpendingWallet:
             )
 
         logger.info("Sending %d sat to %s", amount_satoshis, address)
-        tx = self._wallet.send_to(address, amount_satoshis, fee=fee, broadcast=False)
-
-        if not tx.verified:
-            raise WalletError(f"Transaction verification failed: {tx.error}")
-
-        srv = Service(network=Config.BITCOIN_NETWORK)
-        result = srv.sendrawtransaction(tx.raw_hex())
-
-        if result and result.get("txid"):
+        if Config.SIM_MODE:
+            # broadcast=True so bitcoinlib marks spent UTXOs in the local DB.
+            tx = self._wallet.send_to(address, amount_satoshis, fee=fee, broadcast=True)
+            if not tx.verified:
+                raise WalletError(f"Transaction verification failed: {tx.error}")
+            if not tx.txid:
+                raise WalletError(f"Broadcast failed: {getattr(tx, 'error', 'unknown error')}")
             logger.info("Transaction sent: %s", tx.txid)
             return tx.txid
 
+        from bitcoinlib.services.services import Service
+        tx = self._wallet.send_to(address, amount_satoshis, fee=fee, broadcast=False)
+        if not tx.verified:
+            raise WalletError(f"Transaction verification failed: {tx.error}")
+        srv = Service(network=Config.BITCOIN_NETWORK)
+        result = srv.sendrawtransaction(tx.raw_hex())
+        if result and result.get("txid"):
+            logger.info("Transaction sent: %s", tx.txid)
+            return tx.txid
         raise WalletError(f"Broadcast failed: {result}")
 
+    @_synchronized
     def sweep_all(self, address: str, fee_per_kb: int = None) -> str:
         """Send entire balance to address, fee auto-calculated by bitcoinlib. Returns txid."""
         tx = self._wallet.sweep(address, broadcast=True, fee_per_kb=fee_per_kb)

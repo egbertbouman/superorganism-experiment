@@ -22,8 +22,13 @@ sleep 2
 
 BCLI=(bitcoin-cli -regtest -datadir="${BTC_DATADIR}" -rpcuser=mycelium -rpcpassword=regtest -rpcconnect=127.0.0.1 -rpcport=18443)
 
-# Launch bitcoind.
-bitcoind -regtest -daemon -fallbackfee=0.0001 -txindex \
+# Wipe any leftover mempool — pkill'd shutdowns persist it, and an "unbroadcast"
+# tx left from a crashed run jams every bitcoinlib scan after.
+rm -f "${BTC_DATADIR}/regtest/mempool.dat"
+
+# -minrelaytxfee=0/-blockmintxfee=0: bitcoinlib's auto-fee on regtest lands at
+# the boundary; without this it gets "min relay fee not met" or stuck unbroadcast.
+bitcoind -regtest -daemon -fallbackfee=0.0001 -minrelaytxfee=0 -blockmintxfee=0 -txindex \
     -datadir="${BTC_DATADIR}" \
     -rpcuser=mycelium -rpcpassword=regtest \
     -rpcbind=127.0.0.1:18443 -rpcallowip=127.0.0.1
@@ -51,18 +56,33 @@ if [ "${height}" -lt 101 ]; then
 fi
 
 # Launch electrs.
+printf 'mycelium:regtest' >"${BTC_DATADIR}/electrs-auth"
+chmod 600 "${BTC_DATADIR}/electrs-auth"
 electrs --network regtest \
     --daemon-rpc-addr 127.0.0.1:18443 \
-    --electrum-rpc-addr 127.0.0.1:60401 \
-    --cookie mycelium:regtest \
+    --electrum-rpc-addr 0.0.0.0:60401 \
+    --cookie-file "${BTC_DATADIR}/electrs-auth" \
     --db-dir "${BTC_DATADIR}/electrs-db" \
     --log-filters INFO >"${BTC_DATADIR}/electrs.log" 2>&1 &
 echo $! >"${BTC_DATADIR}/electrs.pid"
-sleep 2
-if ! kill -0 "$(cat "${BTC_DATADIR}/electrs.pid")" 2>/dev/null; then
-    echo "[start.sh] error: electrs died on startup; see ${BTC_DATADIR}/electrs.log" >&2
+echo "[start.sh] waiting for electrs TCP port 60401..."
+electrs_ready=0
+for i in $(seq 1 30); do
+    if nc -z 127.0.0.1 60401 2>/dev/null; then
+        electrs_ready=1
+        break
+    fi
+    if ! kill -0 "$(cat "${BTC_DATADIR}/electrs.pid")" 2>/dev/null; then
+        echo "[start.sh] error: electrs died on startup; see ${BTC_DATADIR}/electrs.log" >&2
+        exit 1
+    fi
+    sleep 1
+done
+if [ "${electrs_ready}" -eq 0 ]; then
+    echo "[start.sh] error: electrs did not open TCP port within 30s; see ${BTC_DATADIR}/electrs.log" >&2
     exit 1
 fi
+echo "[start.sh] electrs is listening on 60401"
 
 # Write bitcoinlib provider config.
 python3 - <<'PY'
@@ -80,8 +100,8 @@ data["electrum_regtest"] = {
     "provider": "electrumx",
     "network": "regtest",
     "client_class": "ElectrumxClient",
-    "provider_coin": "",
-    "url": "tcp://localhost:60401",
+    "provider_coin_id": "",
+    "url": "localhost:60401",
     "api_key": "",
     "priority": 11,
     "denominator": 100000000,

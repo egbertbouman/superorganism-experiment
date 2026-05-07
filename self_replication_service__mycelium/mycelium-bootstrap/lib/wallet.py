@@ -4,8 +4,20 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import os
+
 from bitcoinlib.mnemonic import Mnemonic
 from bitcoinlib.wallets import Wallet, wallet_exists, wallet_delete
+
+# Sim-only: bitcoinlib's electrumx _parse_transaction KeyErrors on mempool txs.
+# Production uses HTTP providers and never hits this path.
+if os.getenv("MYCELIUM_SIM_MODE", "").strip().lower() in ("1", "true", "yes"):
+    from bitcoinlib.services.electrumx import ElectrumxClient as _EC
+    _orig_parse_transaction = _EC._parse_transaction
+    def _parse_transaction_safe(self, tx, *args, **kwargs):
+        tx.setdefault("confirmations", 0)
+        return _orig_parse_transaction(self, tx, *args, **kwargs)
+    _EC._parse_transaction = _parse_transaction_safe
 
 logger = logging.getLogger(__name__)
 

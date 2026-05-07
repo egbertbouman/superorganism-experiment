@@ -22,7 +22,8 @@ class NodeState:
     sporestack_balance_cents: int = 0
     burn_rate_cents_per_day: int = 0
     cost_per_day_usd: float = 0.0
-    days_remaining: Optional[int] = None
+    days_remaining: Optional[int] = None        # bought_runway: server lease days
+    total_runway_days: Optional[int] = None     # bought_runway + (wallet+credits)/cost_per_day
     server_expiry_ts: int = 0        # Unix ts of running server lease end
     last_updated: float = 0.0
     vps_provider: str = ""
@@ -30,7 +31,7 @@ class NodeState:
 
 
 class NodeMonitor:
-    REFRESH_INTERVAL = 300  # 5 minutes
+    REFRESH_INTERVAL = 30 if Config.SIM_MODE else 300  # sim: 30s, prod: 5 min
 
     def __init__(self, token_file: Path):
         self._token_file = token_file
@@ -102,20 +103,32 @@ class NodeMonitor:
                     if server_expiry_ts:
                         days_remaining = max(0, int((server_expiry_ts - time.time()) / 86400))
 
+            # Possible total runway = bought server-days + spendable funds / cost_per_day.
+            # Decouples the spawn guard from the always-tight bought-runway: the genesis
+            # can spawn whenever it has the FUNDS for it, not only when it has pre-paid
+            # for that fuel as VPS time.
+            total_runway_days: Optional[int] = days_remaining
+            if days_remaining is not None and Config.VPS_MONTHLY_COST_CENTS > 0:
+                cost_per_day_cents = Config.VPS_MONTHLY_COST_CENTS / 30
+                btc_balance_cents = (btc_balance_sat / 100_000_000) * Config.BTC_USD_RATE * 100
+                total_funds_cents = sporestack_balance_cents + btc_balance_cents
+                total_runway_days = days_remaining + int(total_funds_cents / cost_per_day_cents)
+
             self._state = NodeState(
                 btc_balance_sat=btc_balance_sat,
                 sporestack_balance_cents=sporestack_balance_cents,
                 burn_rate_cents_per_day=burn_rate_cents_per_day,
                 cost_per_day_usd=cost_per_day_usd,
                 days_remaining=days_remaining,
+                total_runway_days=total_runway_days,
                 server_expiry_ts=server_expiry_ts,
                 last_updated=time.time(),
                 vps_provider=vps_provider,
                 vps_region=vps_region,
             )
             logger.info(
-                "Monitor refresh: btc=%d sat, runway=%d days, burn=%d cents/day",
-                btc_balance_sat, days_remaining, burn_rate_cents_per_day,
+                "Monitor refresh: btc=%d sat, runway=%s days (total %s), burn=%d cents/day",
+                btc_balance_sat, days_remaining, total_runway_days, burn_rate_cents_per_day,
             )
         except Exception as e:
             logger.error("NodeMonitor.refresh failed: %s", e)

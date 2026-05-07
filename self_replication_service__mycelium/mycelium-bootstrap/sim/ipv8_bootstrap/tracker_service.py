@@ -35,6 +35,13 @@ from ipv8.requestcache import NumberCacheWithName, RequestCache
 # lazy-imported inside start_api() instead of at module load. Their transitive
 # aiohttp_apispec → apispec → marshmallow chain is brittle to version skew, and
 # the sim entrypoint never starts the REST API (--listen_port_api is unused).
+#
+# Second divergence: EndpointServer.__init__ generates its identity key with
+# curve25519 (libnacl) instead of upstream's "very-low" (sect163k1). Alpine
+# 3.21's openssl is built without binary EC curves (no-ec2m) — the same
+# constraint that forces mycelium clients onto MYCELIUM_IPV8_CURVE=curve25519.
+# The introduction protocol is curve-agnostic; the tracker only signs/verifies
+# its own packets, which libnacl handles end-to-end.
 
 if TYPE_CHECKING:
     from aiohttp.abc import Request
@@ -115,7 +122,7 @@ class EndpointServer(Community):
         """
         Create a new endpoint server.
         """
-        my_peer = Peer(default_eccrypto.generate_key("very-low"))
+        my_peer = Peer(default_eccrypto.generate_key("curve25519"))
         self.signature_length = default_eccrypto.get_signature_length(my_peer.public_key)
         super().__init__(self.settings_class(my_peer=my_peer, endpoint=endpoint, network=Network()))
         self.request_cache = RequestCache()

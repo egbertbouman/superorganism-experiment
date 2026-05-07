@@ -18,19 +18,12 @@ if [ ! -f "${SIM_ENV}" ]; then
     exit 1
 fi
 
-# Parse sim_env: secrets get base64-decoded and written to disk; the rest are exported.
+# Pass 1: export env vars only (defer secrets so bitcoinlib's first-run install
+# below doesn't run with stale config and can't clobber files we haven't written yet).
 while IFS= read -r line || [ -n "${line}" ]; do
     case "${line}" in
-        ""|"#"*)
+        ""|"#"*|__SECRET_B64__*)
             continue
-            ;;
-        __SECRET_B64__*)
-            rest="${line#__SECRET_B64__}"
-            secret_path="${rest%%=*}"
-            secret_b64="${rest#*=}"
-            mkdir -p "$(dirname "${secret_path}")"
-            printf '%s' "${secret_b64}" | base64 -d > "${secret_path}"
-            chmod 600 "${secret_path}"
             ;;
         *=*)
             key="${line%%=*}"
@@ -39,6 +32,26 @@ while IFS= read -r line || [ -n "${line}" ]; do
             ;;
         *)
             echo "[entrypoint] WARN: skipping malformed line: ${line}" >&2
+            ;;
+    esac
+done < "${SIM_ENV}"
+
+# Trigger bitcoinlib's first-run installer NOW. It writes ~/.bitcoinlib/{providers.json,
+# install.log, ...} from package templates the first time it's imported. If we let
+# main.py do it, it would overwrite our injected /root/.bitcoinlib/providers.json
+# (which has the regtest electrumx provider entry the rest of the system depends on).
+python3 -c "import bitcoinlib.main" >/dev/null 2>&1 || true
+
+# Pass 2: decode secrets — overwrites whatever bitcoinlib install just wrote.
+while IFS= read -r line || [ -n "${line}" ]; do
+    case "${line}" in
+        __SECRET_B64__*)
+            rest="${line#__SECRET_B64__}"
+            secret_path="${rest%%=*}"
+            secret_b64="${rest#*=}"
+            mkdir -p "$(dirname "${secret_path}")"
+            printf '%s' "${secret_b64}" | base64 -d > "${secret_path}"
+            chmod 600 "${secret_path}"
             ;;
     esac
 done < "${SIM_ENV}"

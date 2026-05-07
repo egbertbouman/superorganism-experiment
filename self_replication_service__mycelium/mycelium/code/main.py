@@ -45,7 +45,7 @@ class Orchestrator:
 
     def __init__(self):
         self.running = False
-        self.code_sync = CodeSync(
+        self.code_sync = None if Config.SIM_MODE else CodeSync(
             repo_path=Config.BASE_DIR,
             branch=Config.REPO_BRANCH
         )
@@ -299,7 +299,6 @@ class Orchestrator:
                 return
 
         tasks = [
-            asyncio.create_task(self.check_for_updates()),
             asyncio.create_task(self.heartbeat()),
             asyncio.create_task(self.run_seedbox_info_announcer()),
             asyncio.create_task(self.monitor_loop()),
@@ -308,6 +307,7 @@ class Orchestrator:
         if Config.SIM_MODE:
             tasks.append(asyncio.create_task(self.run_ipv8_only()))
         else:
+            tasks.append(asyncio.create_task(self.check_for_updates()))
             tasks.append(asyncio.create_task(self.run_seedbox_loop()))
             tasks.append(asyncio.create_task(self.run_torrent_announcer()))
         self._tasks = [self.seedbox, *tasks] if self.seedbox is not None else list(tasks)

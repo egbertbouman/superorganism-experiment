@@ -17,7 +17,7 @@ lxc delete --force "${BUILDER}" 2>/dev/null || true
 lxc image delete "${ALIAS}" 2>/dev/null || true
 
 # 1. Launch Alpine 3.20.
-lxc launch images:alpine/3.20 "${BUILDER}"
+lxc launch images:alpine/3.21 "${BUILDER}"
 
 # Wait for network — image install needs DNS + outbound HTTP.
 echo "[build.sh] waiting for container network..."
@@ -27,12 +27,12 @@ done
 
 # 2a. Runtime apk deps.
 lxc exec "${BUILDER}" -- apk add --no-cache \
-    python3 py3-pip git libsodium ca-certificates
+    python3 py3-pip git libsodium gmp ca-certificates openssh-keygen
 
 # 2b. Transient build deps in a virtual package so we can apk del them in one shot.
 # Required because Alpine/musl often lacks musllinux wheels for cryptography/bcrypt/pynacl.
 lxc exec "${BUILDER}" -- apk add --no-cache --virtual .build-deps \
-    build-base python3-dev libffi-dev openssl-dev libsodium-dev rust cargo
+    build-base python3-dev libffi-dev openssl-dev libsodium-dev gmp-dev rust cargo
 
 # 3. Push mycelium code into /root/mycelium/code/.
 lxc exec "${BUILDER}" -- mkdir -p /root/mycelium /root/data /root/logs

@@ -96,6 +96,10 @@ class Config:
     # Critical safety rail in sim: prevents fallback to Tribler defaults, which would
     # let sim nodes discover real swarm peers (LiberationCommunity ID is shared with prod).
     IPV8_BOOTSTRAP: str = os.getenv("MYCELIUM_IPV8_BOOTSTRAP", "")
+    # IPv8 key block (very-low/low/medium/high → sect curves; curve25519 → libnacl).
+    # Default 'medium' (sect409k1) matches prod; sim sets curve25519 because Alpine's
+    # openssl is built without binary EC curves (no-ec2m).
+    IPV8_CURVE: str = os.getenv("MYCELIUM_IPV8_CURVE", "medium")
     SIM_MODE: bool = os.getenv("MYCELIUM_SIM_MODE", "").strip().lower() in ("1", "true", "yes")
 
     # SporeStack / VPS provisioning defaults (injected by deployer; mirror mycelium-bootstrap/config.json)
@@ -107,6 +111,11 @@ class Config:
     VPS_BILLING_CYCLE: str = os.getenv("MYCELIUM_VPS_BILLING_CYCLE", "monthly")
     # Fallback monthly VPS cost in cents. Used when SporeStack's /server/quote is still not available.
     VPS_MONTHLY_COST_CENTS: int = int(os.getenv("MYCELIUM_VPS_MONTHLY_COST_CENTS", "3000"))
+
+    # BTC→USD rate used to value the wallet for total_runway_days. Conservative
+    # ballpark default; override via MYCELIUM_BTC_USD_RATE if you want it tracked
+    # against a real feed. Set 0 to exclude wallet from total_runway entirely.
+    BTC_USD_RATE: float = float(os.getenv("MYCELIUM_BTC_USD_RATE", "50000"))
 
     # Exit codes
     EXIT_SUCCESS: int = 0

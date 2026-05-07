@@ -355,18 +355,32 @@ def _build_sim_env_lines(env: dict, secrets_in: dict, container_ipv4: str) -> st
     enriched["MYCELIUM_SIM_MODE"] = "1"
     enriched["MYCELIUM_SPORESTACK_BASE_URL"] = f"http://{bridge_ip}:{BIND_PORT}"
     enriched["MYCELIUM_BITCOIN_NETWORK"] = "regtest"
+    # Alpine's openssl is built without binary EC curves (no-ec2m), so IPv8's
+    # default 'medium' (sect409k1) fails. curve25519 uses libnacl, sidestepping openssl.
+    enriched["MYCELIUM_IPV8_CURVE"] = "curve25519"
+    # Match mock's BTC_USD constant so total_runway_days computation in-container
+    # uses the exact same rate the mock uses to price invoices.
+    enriched["MYCELIUM_BTC_USD_RATE"] = str(BTC_USD)
     enriched["MYCELIUM_PUBLIC_IP"] = container_ipv4 or enriched.get("MYCELIUM_PUBLIC_IP", "")
     if bootstrap_ip:
         enriched["MYCELIUM_IPV8_BOOTSTRAP"] = f"{bootstrap_ip}:{IPV8_BOOTSTRAP_PORT}"
     enriched.setdefault("MYCELIUM_LOG_ENDPOINT", f"http://{bridge_ip}:{EVENT_COLLECTOR_PORT}")
+
+    # Sim-time interval overrides — mycelium's wall-clock intervals run unchanged
+    enriched.setdefault("MYCELIUM_DECISION_INTERVAL", "30")
+    enriched.setdefault("MYCELIUM_HEARTBEAT_INTERVAL", "5")
+    enriched.setdefault("MYCELIUM_PEER_REGISTRY_TTL", "30")
+    enriched.setdefault("MYCELIUM_WHOAMI_BROADCAST_INTERVAL", "2")
+    enriched.setdefault("MYCELIUM_WHOAMI_GOSSIP_COOLDOWN", "2")
+    enriched.setdefault("MYCELIUM_UPDATE_CHECK_INTERVAL", "99999999")
 
     providers = {
         "electrum_regtest": {
             "provider": "electrumx",
             "network": "regtest",
             "client_class": "ElectrumxClient",
-            "provider_coin": "",
-            "url": f"tcp://{bridge_ip}:{ELECTRS_PORT}",
+            "provider_coin_id": "",
+            "url": f"{bridge_ip}:{ELECTRS_PORT}",
             "api_key": "",
             "priority": 11,
             "denominator": 100_000_000,

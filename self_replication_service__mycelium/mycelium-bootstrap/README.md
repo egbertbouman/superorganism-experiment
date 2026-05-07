@@ -32,6 +32,34 @@ python deploy_mycelium.py
 python stop_mycelium.py
 ```
 
+## Simulation:
+
+  `cd self_replication_service__mycelium/mycelium-bootstrap/sim`
+```bash
+  ./run_simulation.py --rebuild-images
+````
+```bash
+./stop_simulation.sh && python3 run_simulation.py 
+```
+
+Defaults are --genesis-days 90 --genesis-btc 10 --time-scale 1000, with the genesis log auto-tailing.
+
+In a secondary terminals:
+```bash
+  tail -f sim/data/events.jsonl                # birth + state_snapshots coming
+#  curl -s http://127.0.0.1:8766/healthz | jq   # mock: tokens/servers/time_scale
+  curl -s http://127.0.0.1:8765/healthz        # event collector
+  lxc list                                      # m-<12hex> + ipv8-bootstrap
+  lxc exec m-3dfb682587fe -- cat /root/logs/orchestrator.log  # orchestrator logs
+```
+
+Stop + delete everything:
+```bash
+  ./stop_simulation.sh
+````
+
+Saves events.jsonl to sim/data/runs/<timestamp>/, kills the host services, deletes the containers. Images and the genesis wallet stay.
+
 ## CLI Reference
 
 ### wallet.py

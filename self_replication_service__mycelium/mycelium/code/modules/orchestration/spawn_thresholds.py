@@ -50,8 +50,13 @@ def check_spawn_eligibility(node_state: NodeState, caution_trait: float) -> Spaw
             child_share_sat=0,
         )
 
-    runway_ok  = node_state.days_remaining >= effective_threshold
-    reserve_ok = node_state.days_remaining >= effective_reserve
+    # Spawn guard uses total_runway_days (bought + convertible funds) so spawn fires
+    # whenever the node has the FUNDS to support a child, not only when it has
+    # pre-paid VPS days. Falls back to bought-runway if total isn't computed yet.
+    runway_basis = node_state.total_runway_days if node_state.total_runway_days is not None else node_state.days_remaining
+
+    runway_ok  = runway_basis >= effective_threshold
+    reserve_ok = runway_basis >= effective_reserve
     eligible   = runway_ok and reserve_ok
 
     child_share = compute_child_share(node_state.btc_balance_sat) if eligible else 0
@@ -59,9 +64,9 @@ def check_spawn_eligibility(node_state: NodeState, caution_trait: float) -> Spaw
     if eligible:
         reason = f"eligible (child share: {child_share} sat)"
     elif not runway_ok:
-        reason = f"insufficient runway: {node_state.days_remaining}d < {effective_threshold}d required"
+        reason = f"insufficient runway: {runway_basis}d < {effective_threshold}d required (bought: {node_state.days_remaining}d)"
     else:
-        reason = f"below reserve floor: {node_state.days_remaining}d < {effective_reserve}d"
+        reason = f"below reserve floor: {runway_basis}d < {effective_reserve}d"
 
     logger.debug("Spawn eligibility [caution=%.2f]: %s", caution_trait, reason)
     return SpawnEligibility(
@@ -69,7 +74,7 @@ def check_spawn_eligibility(node_state: NodeState, caution_trait: float) -> Spaw
         reason=reason,
         effective_threshold=effective_threshold,
         effective_reserve=effective_reserve,
-        actual_days=node_state.days_remaining,
+        actual_days=runway_basis,
         child_share_sat=child_share,
     )
 

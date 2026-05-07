@@ -18,7 +18,7 @@ lxc delete --force "${BUILDER}" 2>/dev/null || true
 lxc image delete "${ALIAS}" 2>/dev/null || true
 
 # 1. Launch Alpine 3.20.
-lxc launch images:alpine/3.20 "${BUILDER}"
+lxc launch images:alpine/3.21 "${BUILDER}"
 
 # Wait for network — pip needs DNS + outbound HTTP.
 echo "[build.sh] waiting for container network..."
@@ -39,7 +39,7 @@ lxc exec "${BUILDER}" -- apk add --no-cache --virtual .build-deps \
 # 3. Install pyipv8 — pinned to match mycelium-base so client and bootstrap
 # speak the same IPv8 protocol version.
 lxc exec "${BUILDER}" -- pip install --no-cache-dir --break-system-packages \
-    pyipv8==3.1.0
+    pyipv8==3.2.0
 
 # 4. Drop build deps and caches.
 lxc exec "${BUILDER}" -- apk del .build-deps

@@ -96,7 +96,7 @@ class LiberationAnnouncer:
         else:
             logger.info("Creating new key: %s", key_path)
 
-        builder.add_key("liberation_peer", "medium", str(key_path))
+        builder.add_key("liberation_peer", Config.IPV8_CURVE, str(key_path))
 
         bootstrap_defs = _resolve_bootstrap_defs()
 
