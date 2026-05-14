@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from decimal import Decimal, ROUND_DOWN
 from types import TracebackType
 from typing import Any
 from urllib.parse import quote
@@ -9,9 +8,7 @@ from urllib.parse import quote
 import httpx
 
 from bitcoin.rpc_errors import BitcoinRpcError
-from bitcoin.txid import validate_txid
-
-SATOSHIS_PER_BTC = Decimal("100000000")
+from bitcoin.utils import validate_raw_tx_hex, validate_txid
 
 
 @dataclass(frozen=True)
@@ -236,26 +233,169 @@ class BitcoinRpcClient:
             raise ValueError("getrawtransaction returned a non-dict result.")
         return result
 
-    @staticmethod
-    def sats_to_btc_string(amount_sats: int) -> str:
+    def get_block_count(self) -> int:
         """
-        Convert an amount in satoshis to a Bitcoin-denominated decimal string.
+        Return the current blockchain height.
 
-        The returned value is formatted with exactly 8 decimal places, which is the
-        standard precision used for BTC amounts in Bitcoin RPC calls. The conversion uses
-        Decimal arithmetic to avoid floating-point inaccuracies.
+        Calls the getblockcount RPC method and validates that the response is a
+        non-negative integer.
 
-        :param amount_sats: The amount in satoshis. Must be non-negative.
-        :return: A string representing the equivalent BTC amount, formatted for RPC use
-                 (for example, 1500 -> "0.00001500").
-        :raises ValueError: If amount_sats is negative.
+        :returns: The current chain height.
+        :raises ValueError: If the RPC returns a non-integer or negative result.
         :raises BitcoinRpcError: If the underlying RPC call fails.
         """
-        if amount_sats < 0:
-            raise ValueError("amount_sats must be non-negative.")
+        result = self.call("getblockcount")
 
-        btc = (Decimal(amount_sats) / SATOSHIS_PER_BTC).quantize(
-            Decimal("0.00000001"),
-            rounding=ROUND_DOWN,
+        if isinstance(result, bool) or not isinstance(result, int):
+            raise ValueError("getblockcount returned a non-int result.")
+
+        if result < 0:
+            raise ValueError("getblockcount returned a negative block height.")
+
+        return result
+
+    def get_tx_out(
+        self,
+        txid: str,
+        vout: int,
+        include_mempool: bool = True,
+    ) -> dict[str, Any] | None:
+        """
+        Return information about an unspent transaction output.
+
+        Validates the transaction ID, output index, and mempool inclusion flag before
+        calling the gettxout RPC method. Returns None when the requested output is not
+        found or has already been spent.
+
+        :param txid: Transaction ID containing the output.
+        :param vout: Zero-based output index.
+        :param include_mempool: Whether to consider the mempool when querying the UTXO.
+        :returns: The decoded UTXO data, or None if the output is spent or unknown.
+        :raises ValueError: If txid, vout, or include_mempool are invalid, or if the RPC
+                            returns a non-dict non-None result.
+        :raises BitcoinRpcError: If the underlying RPC call fails.
+        """
+        txid = validate_txid(txid)
+
+        if isinstance(vout, bool) or not isinstance(vout, int):
+            raise ValueError("vout must be an integer.")
+        if vout < 0:
+            raise ValueError("vout must be non-negative.")
+
+        if not isinstance(include_mempool, bool):
+            raise ValueError("include_mempool must be a bool.")
+
+        result = self.call("gettxout", txid, vout, include_mempool)
+
+        if result is None:
+            return None
+
+        if not isinstance(result, dict):
+            raise ValueError("gettxout returned a non-dict result.")
+
+        return result
+
+    def create_raw_transaction(
+        self,
+        inputs: list[dict[str, Any]],
+        outputs: list[dict[str, Any]],
+        locktime: int = 0,
+        replaceable: bool = True,
+    ) -> str:
+        """
+        Create a serialized raw transaction.
+
+        Validates the transaction inputs, outputs, locktime, and replaceability flag
+        before calling the createrawtransaction RPC method.
+
+        :param inputs: Transaction inputs in Bitcoin Core RPC format.
+        :param outputs: Transaction outputs in Bitcoin Core RPC format.
+        :param locktime: Transaction locktime. Must be a non-negative integer.
+        :param replaceable: Whether the transaction should signal BIP125 replaceability.
+        :returns: The raw transaction hex string.
+        :raises ValueError: If arguments are invalid or the RPC returns a non-string
+                            result.
+        :raises BitcoinRpcError: If the underlying RPC call fails.
+        """
+        if not isinstance(inputs, list):
+            raise ValueError("inputs must be a list.")
+        if not isinstance(outputs, list):
+            raise ValueError("outputs must be a list.")
+        if isinstance(locktime, bool) or not isinstance(locktime, int):
+            raise ValueError("locktime must be an integer.")
+        if locktime < 0:
+            raise ValueError("locktime must be non-negative.")
+        if not isinstance(replaceable, bool):
+            raise ValueError("replaceable must be a bool.")
+
+        result = self.call(
+            "createrawtransaction",
+            inputs,
+            outputs,
+            locktime,
+            replaceable,
         )
-        return format(btc, "f")
+        if not isinstance(result, str):
+            raise ValueError("createrawtransaction returned a non-string result.")
+        return result
+
+    def decode_raw_transaction(self, raw_tx_hex: str) -> dict[str, Any]:
+        """
+        Decode a serialized raw transaction.
+
+        Validates that the raw transaction is a non-empty hexadecimal string before
+        calling the decoderawtransaction RPC method.
+
+        :param raw_tx_hex: Raw transaction hex.
+        :returns: The decoded transaction object.
+        :raises ValueError: If raw_tx_hex is invalid or the RPC returns a non-dict result.
+        :raises BitcoinRpcError: If the underlying RPC call fails.
+        """
+        raw_tx_hex = validate_raw_tx_hex(raw_tx_hex)
+        result = self.call("decoderawtransaction", raw_tx_hex)
+        if not isinstance(result, dict):
+            raise ValueError("decoderawtransaction returned a non-dict result.")
+        return result
+
+    def send_raw_transaction(self, raw_tx_hex: str) -> str:
+        """
+        Broadcast a serialized raw transaction.
+
+        Validates the raw transaction hexadecimal string before calling the
+        sendrawtransaction RPC method.
+
+        :param raw_tx_hex: Raw transaction hex.
+        :returns: The transaction ID of the broadcast transaction.
+        :raises ValueError: If raw_tx_hex is invalid or the RPC returns a non-string
+                            result.
+        :raises BitcoinRpcError: If the underlying RPC call fails.
+        """
+        raw_tx_hex = validate_raw_tx_hex(raw_tx_hex)
+        result = self.call("sendrawtransaction", raw_tx_hex)
+        if not isinstance(result, str):
+            raise ValueError("sendrawtransaction returned a non-string result.")
+        return result
+
+    def test_mempool_accept(self, raw_tx_hex: str) -> dict[str, Any]:
+        """
+        Test whether a serialized raw transaction would be accepted into the mempool.
+
+        Validates the raw transaction hexadecimal string before calling the
+        testmempoolaccept RPC method.
+
+        :param raw_tx_hex: Raw transaction hex.
+        :returns: The single result object returned by Bitcoin Core.
+        :raises ValueError: If raw_tx_hex is invalid or the RPC returns an unexpected
+                            shape.
+        :raises BitcoinRpcError: If the underlying RPC call fails.
+        """
+        raw_tx_hex = validate_raw_tx_hex(raw_tx_hex)
+        result = self.call("testmempoolaccept", [raw_tx_hex])
+        if not isinstance(result, list) or len(result) != 1:
+            raise ValueError("testmempoolaccept returned an unexpected result.")
+
+        item = result[0]
+        if not isinstance(item, dict):
+            raise ValueError("testmempoolaccept result item was not a dict.")
+
+        return item
