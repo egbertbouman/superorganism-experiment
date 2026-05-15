@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import List, Optional, Protocol
 from uuid import UUID
 
+from democracy.funding.models import FundingCampaign, FundingPledge
 from democracy.models.DTOs.issue_with_votes import IssueWithVotes
 from democracy.models.DTOs.solution_with_votes import SolutionWithVotes
 from democracy.models.issue import Issue
@@ -50,6 +51,36 @@ class DemocracyWriteRepository(Protocol):
     def record_solution_vote(self, vote: SolutionVote) -> VoteRecordResult: ...
 
 
+class FundingReadRepository(Protocol):
+    """
+    Application-facing read access for funding data.
+    """
+
+    def get_campaign(self, campaign_id: UUID) -> Optional[FundingCampaign]: ...
+
+    def get_campaign_for_solution(
+        self, solution_id: UUID
+    ) -> Optional[FundingCampaign]: ...
+
+    def get_all_campaigns(self) -> List[FundingCampaign]: ...
+
+    def get_pledge(self, pledge_id: UUID) -> Optional[FundingPledge]: ...
+
+    def get_pledges_for_campaign(self, campaign_id: UUID) -> List[FundingPledge]: ...
+
+    def get_all_pledges(self) -> List[FundingPledge]: ...
+
+
+class FundingWriteRepository(Protocol):
+    """
+    Application-facing write access for funding data.
+    """
+
+    def add_campaign(self, campaign: FundingCampaign) -> None: ...
+
+    def add_pledge(self, pledge: FundingPledge) -> None: ...
+
+
 class DemocracySyncRepository(ClosableRepository, Protocol):
     """
     Raw entity access used by the replication/synchronization layer.
@@ -83,9 +114,31 @@ class DemocracySyncRepository(ClosableRepository, Protocol):
 
     def add_solution(self, solution: Solution) -> None: ...
 
+    def get_campaign(self, campaign_id: UUID) -> Optional[FundingCampaign]: ...
+
+    def get_campaign_for_solution(
+        self, solution_id: UUID
+    ) -> Optional[FundingCampaign]: ...
+
+    def get_all_campaigns(self) -> List[FundingCampaign]: ...
+
+    def add_campaign(self, campaign: FundingCampaign) -> None: ...
+
+    def get_pledge(self, pledge_id: UUID) -> Optional[FundingPledge]: ...
+
+    def get_pledges_for_campaign(self, campaign_id: UUID) -> List[FundingPledge]: ...
+
+    def get_all_pledges(self) -> List[FundingPledge]: ...
+
+    def add_pledge(self, pledge: FundingPledge) -> None: ...
+
 
 class DemocracyAppRepository(
-    DemocracyReadRepository, DemocracyWriteRepository, Protocol
+    DemocracyReadRepository,
+    DemocracyWriteRepository,
+    FundingReadRepository,
+    FundingWriteRepository,
+    Protocol,
 ):
     """
     Repository surface used by the application service.
@@ -93,7 +146,12 @@ class DemocracyAppRepository(
 
 
 class DemocracyRepository(
-    DemocracyReadRepository, DemocracyWriteRepository, DemocracySyncRepository, Protocol
+    DemocracyReadRepository,
+    DemocracyWriteRepository,
+    DemocracySyncRepository,
+    FundingReadRepository,
+    FundingWriteRepository,
+    Protocol,
 ):
     """
     Full repository surface implemented by concrete persistence backends.
