@@ -13,7 +13,7 @@ from democracy.network.object_type import ObjectType
 
 logger = logging.getLogger(f"superorganism.{__name__}")
 
-_OBJECT_TYPE_BITS = 2
+_OBJECT_TYPE_BITS = 3
 _OBJECT_ID_BITS = 128
 _BITS_PER_ITEM = _OBJECT_TYPE_BITS + _OBJECT_ID_BITS
 MAX_GOSSIP_ITEMS_BLOB_BYTES = 1300
@@ -258,7 +258,7 @@ class IHaveMessage(_GossipItemsMessageBase):
     full objects immediately.
     """
 
-    msg_id = 5
+    msg_id = 7
     _brief_name = "IHAVE"
 
 
@@ -270,5 +270,5 @@ class IWantMessage(_GossipItemsMessageBase):
     This message asks a peer to send the full objects for one or more object ids.
     """
 
-    msg_id = 6
+    msg_id = 8
     _brief_name = "IWANT"

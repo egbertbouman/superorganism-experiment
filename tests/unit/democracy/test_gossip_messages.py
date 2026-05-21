@@ -85,8 +85,8 @@ def test_canonicalize_items_deduplicates_and_sorts_by_type_then_uuid() -> None:
 # =========================================================
 def test_encoded_size_for_item_count_returns_expected_byte_sizes() -> None:
     assert _encoded_size_for_item_count(0) == 0
-    assert _encoded_size_for_item_count(1) == ceil(130 / 8)
-    assert _encoded_size_for_item_count(2) == ceil(2 * 130 / 8)
+    assert _encoded_size_for_item_count(1) == ceil(131 / 8)
+    assert _encoded_size_for_item_count(2) == ceil(2 * 131 / 8)
 
 
 # =========================================================
@@ -104,7 +104,7 @@ def test_encoded_gossip_items_size_uses_unique_item_count() -> None:
 
     assert encoded_gossip_items_size(
         [duplicate_item, duplicate_item, distinct_item]
-    ) == ceil(2 * 130 / 8)
+    ) == ceil(2 * 131 / 8)
 
 
 # =========================================================
@@ -116,7 +116,7 @@ def test_max_gossip_items_for_blob_size_returns_expected_capacity(monkeypatch) -
     assert max_gossip_items_for_blob_size(0) == 0
     assert max_gossip_items_for_blob_size(16) == 0
     assert max_gossip_items_for_blob_size(17) == 1
-    assert max_gossip_items_for_blob_size(MAX_GOSSIP_ITEMS_BLOB_BYTES) == 80
+    assert max_gossip_items_for_blob_size(MAX_GOSSIP_ITEMS_BLOB_BYTES) == 79
 
 
 def test_max_gossip_items_for_blob_size_rejects_negative_sizes() -> None:
@@ -230,7 +230,7 @@ def test_encode_gossip_items_encodes_canonicalized_items() -> None:
     )
 
     assert encoded == bytes.fromhex(
-        "004444444444450446044444444444444722222222222242228222222222222222"
+        "0088888888888a088c088888888888888b22222222222242228222222222222222"
     )
 
 
