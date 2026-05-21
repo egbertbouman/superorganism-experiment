@@ -99,9 +99,9 @@ class FundingService:
     def create_campaign(
         self,
         solution: Solution,
-        developer_payout_address: str,
+        developer_payout_address: str | None,
         asking_price_sats: int,
-        deadline_height_offset: int,
+        deadline_height_offset: int | None,
     ) -> FundingCampaign:
         """
         Create and store a funding campaign for a solution.
@@ -116,20 +116,48 @@ class FundingService:
         :param deadline_height_offset: The number of blocks from the current height
                                        until the campaign deadline.
         :returns: The created funding campaign.
-        :raises ValueError: If deadline_height_offset is not positive, a campaign already
+        :raises ValueError: If the campaign terms are inconsistent, a campaign already
                             exists for the solution, or the solution is unknown to the
                             repository.
         """
-        if deadline_height_offset <= 0:
-            raise ValueError("deadline_height_offset must be positive.")
+        normalized_payout_address: str | None = None
+        if developer_payout_address is not None:
+            normalized_payout_address = developer_payout_address.strip()
+            if not normalized_payout_address:
+                normalized_payout_address = None
 
-        current_height = self.bitcoin_rpc.get_block_count()
-        deadline_height = current_height + deadline_height_offset
+        if asking_price_sats < 0:
+            raise ValueError("asking_price_sats must be non-negative.")
+
+        deadline_height: int | None = None
+        if asking_price_sats == 0:
+            if normalized_payout_address is not None:
+                raise ValueError(
+                    "developer_payout_address must be omitted when asking_price_sats is 0."
+                )
+            if deadline_height_offset is not None:
+                raise ValueError(
+                    "deadline_height_offset must be omitted when asking_price_sats is 0."
+                )
+        else:
+            if normalized_payout_address is None:
+                raise ValueError(
+                    "developer_payout_address is required when asking_price_sats is positive."
+                )
+            if deadline_height_offset is None:
+                raise ValueError(
+                    "deadline_height_offset is required when asking_price_sats is positive."
+                )
+            if deadline_height_offset <= 0:
+                raise ValueError("deadline_height_offset must be positive.")
+
+            current_height = self.bitcoin_rpc.get_block_count()
+            deadline_height = current_height + deadline_height_offset
 
         campaign = FundingCampaign(
             solution_id=solution.id,
             solution_hash=solution.compute_hash(),
-            developer_payout_address=developer_payout_address,
+            developer_payout_address=normalized_payout_address,
             asking_price_sats=asking_price_sats,
             deadline_height=deadline_height,
         )
@@ -178,6 +206,7 @@ class FundingService:
         """
         txid = validate_txid(txid)
         campaign = self._require_campaign(campaign_id)
+        self._require_active_campaign(campaign)
         self._ensure_campaign_not_expired(campaign)
 
         utxo = self.bitcoin_rpc.get_tx_out(txid, vout, include_mempool=True)
@@ -241,6 +270,7 @@ class FundingService:
         """
         txid = validate_txid(txid)
         campaign = self._require_campaign(campaign_id)
+        self._require_active_campaign(campaign)
         self._ensure_campaign_not_expired(campaign)
 
         utxo = self.bitcoin_rpc.get_tx_out(txid, vout, include_mempool=True)
@@ -323,6 +353,8 @@ class FundingService:
         campaign = self.repository.get_campaign(pledge.campaign_id)
         if campaign is None:
             return PledgeValidationResult(False, "Unknown campaign.")
+        if not campaign.is_active:
+            return PledgeValidationResult(False, "Campaign is inactive.")
 
         return self._validate_pledge_for_campaign(
             pledge,
@@ -349,6 +381,7 @@ class FundingService:
         :raises ValueError: If the campaign does not exist.
         """
         campaign = self._require_campaign(campaign_id)
+        self._require_active_campaign(campaign)
         prepared_pledges = self._prepare_valid_pledges_for_campaign(campaign)
         return [prepared.pledge for prepared in prepared_pledges]
 
@@ -454,6 +487,7 @@ class FundingService:
             raise ValueError("fee_buffer_sats must be non-negative.")
 
         campaign = self._require_campaign(campaign_id)
+        self._require_active_campaign(campaign)
         current_height = self.bitcoin_rpc.get_block_count()
         is_expired = current_height > campaign.deadline_height
         required_total = campaign.asking_price_sats + fee_buffer_sats
@@ -501,6 +535,7 @@ class FundingService:
             raise ValueError("fee_buffer_sats must be non-negative.")
 
         campaign = self._require_campaign(campaign_id)
+        self._require_active_campaign(campaign)
         current_height = self.bitcoin_rpc.get_block_count()
 
         prepared_pledges = self._prepare_valid_pledges_for_open_campaign(
@@ -648,6 +683,7 @@ class FundingService:
         :raises ValueError: If the current blockchain height is greater than the campaign
                             deadline height.
         """
+        self._require_active_campaign(campaign)
         current_height = self.bitcoin_rpc.get_block_count()
         self._ensure_campaign_not_expired_at_height(campaign, current_height)
 
@@ -663,6 +699,7 @@ class FundingService:
         :param current_height: The chain height snapshot to compare to the deadline.
         :raises ValueError: If the campaign deadline has passed.
         """
+        self._require_active_campaign(campaign)
         if current_height > campaign.deadline_height:
             raise ValueError(
                 f"Campaign expired at height {campaign.deadline_height}; "
@@ -694,6 +731,9 @@ class FundingService:
         :return: A PledgeValidationResult when validation fails, or None when all
                  chain-level checks pass.
         """
+        if not campaign.is_active:
+            return PledgeValidationResult(False, "Campaign is inactive.")
+
         if current_height is None:
             current_height = self.bitcoin_rpc.get_block_count()
         if current_height > campaign.deadline_height:
@@ -740,6 +780,9 @@ class FundingService:
         Expired campaigns return an empty list because they no longer have any currently
         usable pledges.
         """
+        if not campaign.is_active:
+            return []
+
         if current_height is None:
             current_height = self.bitcoin_rpc.get_block_count()
 
@@ -980,14 +1023,22 @@ class FundingService:
         :param campaign_commitment_hex: Hex-encoded campaign commitment for OP_RETURN.
         :return: Bitcoin Core-compatible output list for the campaign transaction.
         """
+        if not campaign.is_active:
+            raise ValueError("Cannot build outputs for an inactive campaign.")
+
+        payout_address = campaign.developer_payout_address
+        if payout_address is None:
+            raise ValueError("Active campaigns must define a payout address.")
+
         return [
-            {
-                campaign.developer_payout_address: sats_to_btc_string(
-                    campaign.asking_price_sats
-                )
-            },
+            {payout_address: sats_to_btc_string(campaign.asking_price_sats)},
             {"data": campaign_commitment_hex},
         ]
+
+    @staticmethod
+    def _require_active_campaign(campaign: FundingCampaign) -> None:
+        if not campaign.is_active:
+            raise ValueError(f"Campaign {campaign.id} is inactive.")
 
     @staticmethod
     def _extract_single_input_sequence(decoded_tx: dict[str, object]) -> int:

@@ -133,9 +133,9 @@ class SQLiteDemocracyRepository(DemocracyRepository):
                     id TEXT PRIMARY KEY,
                     solution_id TEXT NOT NULL,
                     solution_hash TEXT NOT NULL,
-                    developer_payout_address TEXT NOT NULL,
+                    developer_payout_address TEXT,
                     asking_price_sats INTEGER NOT NULL,
-                    deadline_height INTEGER NOT NULL,
+                    deadline_height INTEGER,
                     created_at TEXT NOT NULL,
                 
                     FOREIGN KEY (solution_id)
@@ -1216,7 +1216,11 @@ class SQLiteDemocracyRepository(DemocracyRepository):
             solution_hash=row["solution_hash"],
             developer_payout_address=row["developer_payout_address"],
             asking_price_sats=int(row["asking_price_sats"]),
-            deadline_height=int(row["deadline_height"]),
+            deadline_height=(
+                int(row["deadline_height"])
+                if row["deadline_height"] is not None
+                else None
+            ),
             created_at=SQLiteDemocracyRepository._datetime_from_storage(
                 row["created_at"]
             ),

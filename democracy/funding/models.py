@@ -35,18 +35,54 @@ class FundingCampaign:
 
     solution_id: UUID
     solution_hash: str
-    developer_payout_address: str
+    developer_payout_address: str | None
     asking_price_sats: int
-    deadline_height: int
+    deadline_height: int | None
     id: UUID = field(default_factory=uuid4)
     created_at: datetime = field(default_factory=lambda: datetime.now(timezone.utc))
 
     def __post_init__(self) -> None:
-        if self.asking_price_sats <= 0:
-            raise ValueError("asking_price_sats must be positive.")
+        normalized_payout_address: str | None = None
+        if self.developer_payout_address is not None:
+            normalized_payout_address = self.developer_payout_address.strip()
+            if not normalized_payout_address:
+                normalized_payout_address = None
 
-        if self.deadline_height <= 0:
+        object.__setattr__(
+            self,
+            "developer_payout_address",
+            normalized_payout_address,
+        )
+
+        if self.asking_price_sats < 0:
+            raise ValueError("asking_price_sats must be non-negative.")
+
+        if self.deadline_height is not None and self.deadline_height <= 0:
             raise ValueError("deadline_height must be positive.")
+
+        if self.asking_price_sats == 0:
+            if self.developer_payout_address is not None:
+                raise ValueError(
+                    "developer_payout_address must be omitted when asking_price_sats is 0."
+                )
+            if self.deadline_height is not None:
+                raise ValueError(
+                    "deadline_height must be omitted when asking_price_sats is 0."
+                )
+            return
+
+        if self.developer_payout_address is None:
+            raise ValueError(
+                "developer_payout_address is required when asking_price_sats is positive."
+            )
+        if self.deadline_height is None:
+            raise ValueError(
+                "deadline_height is required when asking_price_sats is positive."
+            )
+
+    @property
+    def is_active(self) -> bool:
+        return self.asking_price_sats > 0
 
     def compute_campaign_commitment_hex(self, network_id: bytes) -> str:
         """
@@ -63,9 +99,20 @@ class FundingCampaign:
         """
         if not isinstance(network_id, bytes) or not network_id:
             raise ValueError("network_id must be non-empty bytes.")
+        if not self.is_active:
+            raise ValueError(
+                "Cannot compute campaign commitment for an inactive campaign."
+            )
 
         solution_hash_bytes = bytes.fromhex(self.solution_hash)
-        payout_address_bytes = self.developer_payout_address.encode("utf-8")
+        payout_address = self.developer_payout_address
+        deadline_height = self.deadline_height
+        if payout_address is None or deadline_height is None:
+            raise ValueError(
+                "Active campaigns must define payout address and deadline."
+            )
+
+        payout_address_bytes = payout_address.encode("utf-8")
 
         digest = hashlib.sha256(
             FUNDING_PROTOCOL_LABEL
@@ -75,7 +122,7 @@ class FundingCampaign:
             + _length_prefix(solution_hash_bytes)
             + _length_prefix(payout_address_bytes)
             + self.asking_price_sats.to_bytes(8, "big", signed=False)
-            + self.deadline_height.to_bytes(8, "big", signed=False)
+            + deadline_height.to_bytes(8, "big", signed=False)
         ).hexdigest()
 
         return digest
