@@ -163,15 +163,6 @@ Fresh address:    $wallet_addr
 
 App config file:  $APP_ENV_FILE
 
-Useful commands:
-  btc getblockchaininfo
-  btc listwallets
-  wallet_btc getbalance
-  wallet_btc getnewaddress
-  treasury_btc getnewaddress
-  wallet_btc sendtoaddress <address> 1
-  btc generatetoaddress 1 \$(wallet_btc getnewaddress)
-
 EOF
 }
 
@@ -305,6 +296,40 @@ show_treasury_address() {
   fi
 }
 
+sign_psbt() {
+  local psbt_base64="${1:-}"
+
+  if [ -z "$psbt_base64" ]; then
+    echo "Usage: $0 sign-psbt <psbt_base64>" >&2
+    exit 1
+  fi
+
+  local processed_json
+  local signed_psbt
+  local complete
+
+  processed_json="$(
+    wallet_btc walletprocesspsbt \
+      "$psbt_base64" \
+      true \
+      "ALL|ANYONECANPAY" \
+      false \
+      false
+  )"
+  signed_psbt="$(echo "$processed_json" | jq -r '.psbt')"
+  complete="$(echo "$processed_json" | jq -r '.complete')"
+
+  if [ -z "$signed_psbt" ] || [ "$signed_psbt" = "null" ]; then
+    echo "Failed to sign PSBT." >&2
+    exit 1
+  fi
+
+  echo "Signed PSBT:"
+  echo "$signed_psbt"
+  echo
+  echo "Complete: $complete"
+}
+
 case "${1:-start}" in
   start)
     start_node
@@ -327,8 +352,11 @@ case "${1:-start}" in
   treasury-address)
     show_treasury_address
     ;;
+  sign-psbt)
+    sign_psbt "${2:-}"
+    ;;
   *)
-    echo "Usage: $0 {start|stop|reset|status|mine [n]|send <address> [amount] [op_return_hex]|treasury-address}" >&2
+    echo "Usage: $0 {start|stop|reset|status|mine [n]|send <address> [amount] [op_return_hex]|treasury-address|sign-psbt <psbt_base64>}" >&2
     exit 1
     ;;
 esac

@@ -6,12 +6,15 @@ from enum import Enum
 from typing import Any, Callable, Generic, Protocol, TypeVar
 from uuid import UUID
 
+from democracy.funding.models import FundingCampaign, FundingPledge
 from democracy.models.issue import Issue
 from democracy.models.issue_vote import IssueVote
 from democracy.models.solution import Solution
 from democracy.models.solution_vote import SolutionVote
 from democracy.models.vote_record_result import VoteRecordResult
 from democracy.network.messages.base_message import BaseMessage
+from democracy.network.messages.funding_campaign_message import FundingCampaignMessage
+from democracy.network.messages.funding_pledge_message import FundingPledgeMessage
 from democracy.network.messages.gossip_messages import GossipItem
 from democracy.network.messages.issue_message import IssueMessage
 from democracy.network.messages.issue_vote_message import IssueVoteMessage
@@ -33,6 +36,7 @@ TModel = TypeVar("TModel", bound=HasUuidId)
 
 class StoreStatus(Enum):
     """Result of attempting to store an incoming object."""
+
     STORED = "stored"
     ALREADY_PRESENT = "already_present"
     REJECTED = "rejected"
@@ -43,8 +47,8 @@ class ReplicationHandler(Generic[TModel]):
     Handles replication logic for one type of democracy object.
 
     A replication handler connects an object type to its model class, network message
-    class, and repository operations. This allows the gossip layer to treat issues, votes,
-    solutions, and solution votes in a uniform way.
+    class, and repository operations. This allows the gossip layer to treat all
+    replicated democracy and funding objects in a uniform way.
     """
 
     def __init__(
@@ -214,8 +218,8 @@ def build_replication_handlers(
     votes are also recorded in the corresponding vote store.
 
     :param repository: Repository used to retrieve, store, and record replicated objects.
-    :return: List of replication handlers for issues, issue votes, solutions, and solution
-             votes.
+    :return: List of replication handlers for all replicated democracy and funding
+             objects.
     """
     issue_handler: ReplicationHandler[Issue] = ReplicationHandler(
         object_type=ObjectType.ISSUE,
@@ -251,9 +255,27 @@ def build_replication_handlers(
         add_one=repository.add_solution_vote,
         record_vote=repository.record_solution_vote,
     )
+    funding_campaign_handler: ReplicationHandler[FundingCampaign] = ReplicationHandler(
+        object_type=ObjectType.FUNDING_CAMPAIGN,
+        model_cls=FundingCampaign,
+        message_cls=FundingCampaignMessage,
+        get_all_models=repository.get_all_campaigns,
+        get_one=repository.get_campaign,
+        add_one=repository.add_campaign,
+    )
+    funding_pledge_handler: ReplicationHandler[FundingPledge] = ReplicationHandler(
+        object_type=ObjectType.FUNDING_PLEDGE,
+        model_cls=FundingPledge,
+        message_cls=FundingPledgeMessage,
+        get_all_models=repository.get_all_pledges,
+        get_one=repository.get_pledge,
+        add_one=repository.add_pledge,
+    )
     return [
         issue_handler,
         issue_vote_handler,
         solution_handler,
         solution_vote_handler,
+        funding_campaign_handler,
+        funding_pledge_handler,
     ]

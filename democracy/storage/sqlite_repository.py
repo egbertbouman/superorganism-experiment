@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any, List, Optional
 from uuid import UUID
 
+from democracy.funding.models import FundingCampaign, FundingPledge
 from democracy.models.DTOs.issue_with_votes import IssueWithVotes
 from democracy.models.DTOs.solution_with_votes import SolutionWithVotes
 from democracy.models.issue import Issue
@@ -127,6 +128,39 @@ class SQLiteDemocracyRepository(DemocracyRepository):
 
                     UNIQUE (solution_id, voter_id)
                 );
+                
+                CREATE TABLE IF NOT EXISTS funding_campaigns (
+                    id TEXT PRIMARY KEY,
+                    solution_id TEXT NOT NULL,
+                    solution_hash TEXT NOT NULL,
+                    developer_payout_address TEXT,
+                    asking_price_sats INTEGER NOT NULL,
+                    deadline_height INTEGER,
+                    created_at TEXT NOT NULL,
+                
+                    FOREIGN KEY (solution_id)
+                        REFERENCES solutions(id)
+                        ON DELETE CASCADE,
+                
+                    UNIQUE(solution_id)
+                );
+                
+                CREATE TABLE IF NOT EXISTS funding_pledges (
+                    id TEXT PRIMARY KEY,
+                    campaign_id TEXT NOT NULL,
+                    pledger_id TEXT NOT NULL,
+                    txid TEXT NOT NULL,
+                    vout INTEGER NOT NULL,
+                    value_sats INTEGER NOT NULL,
+                    signed_pledge_psbt TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                
+                    FOREIGN KEY (campaign_id)
+                        REFERENCES funding_campaigns(id)
+                        ON DELETE CASCADE,
+                
+                    UNIQUE(campaign_id, txid, vout)
+                );
 
                 CREATE INDEX IF NOT EXISTS idx_issue_votes_issue_id
                     ON issue_votes(issue_id);
@@ -142,6 +176,15 @@ class SQLiteDemocracyRepository(DemocracyRepository):
 
                 CREATE INDEX IF NOT EXISTS idx_solution_votes_voter_solution
                     ON solution_votes(voter_id, solution_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_funding_campaigns_solution_id
+                    ON funding_campaigns(solution_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_funding_pledges_campaign
+                    ON funding_pledges(campaign_id);
+                
+                CREATE INDEX IF NOT EXISTS idx_funding_pledges_outpoint
+                    ON funding_pledges(txid, vout);
                 """)
 
     # ------------------------------------------------------------------
@@ -894,6 +937,201 @@ class SQLiteDemocracyRepository(DemocracyRepository):
         return [self._row_to_solution(row) for row in rows]
 
     # ------------------------------------------------------------------
+    # Funding campaigns
+    # ------------------------------------------------------------------
+
+    def add_campaign(self, campaign: FundingCampaign) -> None:
+        """
+        Store a funding campaign.
+
+        :param campaign: The funding campaign to store.
+        :return: None
+        :raises sqlite3.IntegrityError: If the campaign ID already exists, if a campaign
+            already exists for the solution, or if the referenced solution does not exist.
+        """
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO funding_campaigns (
+                    id,
+                    solution_id,
+                    solution_hash,
+                    developer_payout_address,
+                    asking_price_sats,
+                    deadline_height,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    str(campaign.id),
+                    str(campaign.solution_id),
+                    campaign.solution_hash,
+                    campaign.developer_payout_address,
+                    campaign.asking_price_sats,
+                    campaign.deadline_height,
+                    self._datetime_to_storage(campaign.created_at),
+                ),
+            )
+
+    def get_campaign(self, campaign_id: UUID) -> Optional[FundingCampaign]:
+        """
+        Retrieve a funding campaign by its ID.
+
+        :param campaign_id: The campaign ID.
+        :return: The funding campaign if found, otherwise None.
+        """
+        row = self._connection.execute(
+            """
+            SELECT *
+            FROM funding_campaigns
+            WHERE id = ?;
+            """,
+            (str(campaign_id),),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_campaign(row)
+
+    def get_campaign_for_solution(
+        self,
+        solution_id: UUID,
+    ) -> Optional[FundingCampaign]:
+        """
+        Retrieve the funding campaign for a solution.
+
+        :param solution_id: The solution ID.
+        :return: The funding campaign if one exists, otherwise None.
+        """
+        row = self._connection.execute(
+            """
+            SELECT *
+            FROM funding_campaigns
+            WHERE solution_id = ?;
+            """,
+            (str(solution_id),),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_campaign(row)
+
+    def get_all_campaigns(self) -> List[FundingCampaign]:
+        """
+        Retrieve all funding campaigns.
+
+        :return: List of funding campaigns.
+        """
+        rows = self._connection.execute("""
+            SELECT *
+            FROM funding_campaigns
+            ORDER BY created_at DESC;
+            """).fetchall()
+
+        return [self._row_to_campaign(row) for row in rows]
+
+    # ------------------------------------------------------------------
+    # Funding pledges
+    # ------------------------------------------------------------------
+
+    def add_pledge(self, pledge: FundingPledge) -> None:
+        """
+        Store a funding pledge.
+
+        :param pledge: The funding pledge to store.
+        :return: None
+        :raises sqlite3.IntegrityError: If the pledge ID already exists, if the same
+            outpoint was already pledged for the campaign, or if the campaign does not
+            exist.
+        """
+        with self._connection:
+            self._connection.execute(
+                """
+                INSERT INTO funding_pledges (
+                    id,
+                    campaign_id,
+                    pledger_id,
+                    txid,
+                    vout,
+                    value_sats,
+                    signed_pledge_psbt,
+                    created_at
+                )
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?);
+                """,
+                (
+                    str(pledge.id),
+                    str(pledge.campaign_id),
+                    str(pledge.pledger_id),
+                    pledge.txid,
+                    pledge.vout,
+                    pledge.value_sats,
+                    pledge.signed_pledge_psbt,
+                    self._datetime_to_storage(pledge.created_at),
+                ),
+            )
+
+    def get_pledge(self, pledge_id: UUID) -> Optional[FundingPledge]:
+        """
+        Retrieve a funding pledge by its ID.
+
+        :param pledge_id: The pledge ID.
+        :return: The funding pledge if found, otherwise None.
+        """
+        row = self._connection.execute(
+            """
+            SELECT *
+            FROM funding_pledges
+            WHERE id = ?;
+            """,
+            (str(pledge_id),),
+        ).fetchone()
+
+        if row is None:
+            return None
+
+        return self._row_to_pledge(row)
+
+    def get_pledges_for_campaign(
+        self,
+        campaign_id: UUID,
+    ) -> List[FundingPledge]:
+        """
+        Retrieve all pledges for a funding campaign.
+
+        :param campaign_id: The campaign ID.
+        :return: List of funding pledges for the campaign.
+        """
+        rows = self._connection.execute(
+            """
+            SELECT *
+            FROM funding_pledges
+            WHERE campaign_id = ?
+            ORDER BY created_at ASC;
+            """,
+            (str(campaign_id),),
+        ).fetchall()
+
+        return [self._row_to_pledge(row) for row in rows]
+
+    def get_all_pledges(self) -> List[FundingPledge]:
+        """
+        Retrieve all funding pledges.
+
+        :return: List of funding pledges.
+        """
+        rows = self._connection.execute("""
+            SELECT *
+            FROM funding_pledges
+            ORDER BY created_at DESC;
+            """).fetchall()
+
+        return [self._row_to_pledge(row) for row in rows]
+
+    # ------------------------------------------------------------------
     # Lifecycle
     # ------------------------------------------------------------------
 
@@ -959,6 +1197,51 @@ class SQLiteDemocracyRepository(DemocracyRepository):
             title=row["title"],
             creator_id=UUID(row["creator_id"]),
             description=row["description"],
+            created_at=SQLiteDemocracyRepository._datetime_from_storage(
+                row["created_at"]
+            ),
+        )
+
+    @staticmethod
+    def _row_to_campaign(row: sqlite3.Row) -> FundingCampaign:
+        """
+        Convert a SQLite row to a FundingCampaign model.
+
+        :param row: SQLite row.
+        :return: FundingCampaign instance.
+        """
+        return FundingCampaign(
+            id=UUID(row["id"]),
+            solution_id=UUID(row["solution_id"]),
+            solution_hash=row["solution_hash"],
+            developer_payout_address=row["developer_payout_address"],
+            asking_price_sats=int(row["asking_price_sats"]),
+            deadline_height=(
+                int(row["deadline_height"])
+                if row["deadline_height"] is not None
+                else None
+            ),
+            created_at=SQLiteDemocracyRepository._datetime_from_storage(
+                row["created_at"]
+            ),
+        )
+
+    @staticmethod
+    def _row_to_pledge(row: sqlite3.Row) -> FundingPledge:
+        """
+        Convert a SQLite row to a FundingPledge model.
+
+        :param row: SQLite row.
+        :return: FundingPledge instance.
+        """
+        return FundingPledge(
+            id=UUID(row["id"]),
+            campaign_id=UUID(row["campaign_id"]),
+            pledger_id=UUID(row["pledger_id"]),
+            txid=row["txid"],
+            vout=int(row["vout"]),
+            value_sats=int(row["value_sats"]),
+            signed_pledge_psbt=row["signed_pledge_psbt"],
             created_at=SQLiteDemocracyRepository._datetime_from_storage(
                 row["created_at"]
             ),

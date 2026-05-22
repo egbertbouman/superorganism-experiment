@@ -115,6 +115,7 @@ scripts/regtest.sh status
 scripts/regtest.sh mine [n]
 scripts/regtest.sh send <address> [amount] [op_return_hex]
 scripts/regtest.sh treasury-address
+scripts/regtest.sh sign-psbt <psbt_base64>
 ```
 
 | Command            | Description                                                                                                                                                                                                                                                    |
@@ -126,6 +127,7 @@ scripts/regtest.sh treasury-address
 | `mine`             | Mines one or more new regtest blocks. This is especially useful for confirming transactions during testing.                                                                                                                                                    |
 | `send`             | Sends a demo transaction from the local wallet.                                                                                                                                                                                                                |
 | `treasury-address` | Prints the address of the treasury. This is useful for funding the wallet from external tools or for testing incoming transactions.                                                                                                                            |
+| `sign-psbt`        | Signs a base64 PSBT with the local demo wallet using `ALL\|ANYONECANPAY` and prints the signed PSBT. This is intended for the local funding-pledge flow.                                                                                                       |
 
 ## Mycelium
 

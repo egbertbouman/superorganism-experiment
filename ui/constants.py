@@ -17,6 +17,7 @@ SOLUTION_TITLE_MAX_LENGTH: Final[int] = 100
 
 SOLUTION_DESCRIPTION_MIN_LENGTH: Final[int] = 100
 SOLUTION_DESCRIPTION_MAX_LENGTH: Final[int] = 5000
+SOLUTION_VOTE_TARGET: Final[int] = 10
 
 # =========================================================
 # EXTERNAL LINKS

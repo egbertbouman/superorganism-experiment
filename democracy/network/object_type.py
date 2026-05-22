@@ -12,3 +12,5 @@ class ObjectType(IntEnum):
     ISSUE_VOTE = 1
     SOLUTION = 2
     SOLUTION_VOTE = 3
+    FUNDING_CAMPAIGN = 4
+    FUNDING_PLEDGE = 5
