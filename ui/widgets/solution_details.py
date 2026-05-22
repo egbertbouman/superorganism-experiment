@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from dataclasses import dataclass
 from datetime import datetime, timezone
+from enum import StrEnum
 from typing import Optional
 from uuid import UUID
 
 from PySide6.QtCore import Qt, Signal
+from PySide6.QtGui import QResizeEvent
 from PySide6.QtWidgets import (
     QWidget,
     QLabel,
@@ -13,38 +16,71 @@ from PySide6.QtWidgets import (
     QVBoxLayout,
     QHBoxLayout,
     QScrollArea,
-    QSizePolicy,
 )
 
 from democracy.models.DTOs.solution_with_votes import SolutionWithVotes
+from ui.constants import SOLUTION_VOTE_TARGET
+
+_UNSET = object()
 
 
-class SolutionVotePanel(QFrame):
-    voted = Signal()
+class SolutionSidePanelStatus(StrEnum):
+    OPEN = "open"
+    COMPLETED = "completed"
+    EXPIRED = "expired"
 
-    def __init__(self, parent: QWidget | None = None):
+
+@dataclass(frozen=True)
+class SolutionFundingPanelState:
+    has_campaign: bool
+    can_create_pledge: bool = False
+    raised_sats: int | None = None
+    target_sats: int | None = None
+    valid_pledge_count: int | None = None
+    deadline_height: int | None = None
+    payout_address: str = ""
+    status: SolutionSidePanelStatus | None = None
+
+
+class SolutionSidePanel(QFrame):
+    action_clicked = Signal()
+
+    def __init__(
+        self,
+        *,
+        kicker_text: str,
+        primary_value_text: str,
+        status: SolutionSidePanelStatus | None,
+        meta_text: str,
+        action_text: str,
+        helper_text: str,
+        action_enabled: bool,
+        progress_ratio: float,
+        parent: QWidget | None = None,
+    ):
         super().__init__(parent)
-        self.setProperty("variant", "solution-vote-panel")
+        self.setProperty("variant", "solution-side-panel")
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(22, 22, 22, 22)
         layout.setSpacing(14)
 
-        self.status_kicker_lbl = QLabel("CURRENT STATUS")
+        self.status_kicker_lbl = QLabel(kicker_text)
         self.status_kicker_lbl.setProperty("role", "solution-side-kicker")
 
-        self.vote_count_lbl = QLabel("0")
-        self.vote_count_lbl.setProperty("role", "solution-side-votes")
+        self.primary_value_lbl = QLabel(primary_value_text)
+        self.primary_value_lbl.setProperty("role", "solution-side-votes")
 
-        self.status_lbl = QLabel("ACTIVE VOTING")
-        self.status_lbl.setProperty("role", "solution-side-status")
+        self.status_pill_lbl = QLabel("")
+        self.status_pill_lbl.setProperty("role", "solution-side-status-pill")
+        self.status_pill_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
         top_row = QHBoxLayout()
         top_row.setContentsMargins(0, 0, 0, 0)
         top_row.setSpacing(12)
-        top_row.addWidget(self.vote_count_lbl)
-        top_row.addWidget(self.status_lbl, 0, Qt.AlignmentFlag.AlignBottom)
+        top_row.addWidget(self.status_kicker_lbl, 0, Qt.AlignmentFlag.AlignLeft)
         top_row.addStretch()
+        top_row.addWidget(self.status_pill_lbl, 0, Qt.AlignmentFlag.AlignRight)
 
         self.progress_track = QFrame()
         self.progress_track.setProperty("role", "solution-progress-track")
@@ -54,41 +90,210 @@ class SolutionVotePanel(QFrame):
 
         self.progress_fill = QFrame()
         self.progress_fill.setProperty("role", "solution-progress-fill")
-        self.progress_fill.setFixedWidth(120)
+        self.progress_fill.setFixedWidth(0)
 
         progress_layout.addWidget(self.progress_fill, 0)
         progress_layout.addStretch()
 
-        self.quorum_lbl = QLabel("Quorum: 65% Required")
-        self.quorum_lbl.setProperty("role", "solution-side-meta")
-        self.quorum_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
+        self.meta_lbl = QLabel(meta_text)
+        self.meta_lbl.setProperty("role", "solution-side-meta")
+        self.meta_lbl.setAlignment(Qt.AlignmentFlag.AlignRight)
 
-        self.vote_btn = QPushButton("Vote for this solution")
-        self.vote_btn.setProperty("variant", "primary")
-        self.vote_btn.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.vote_btn.clicked.connect(self.voted.emit)
+        self.action_btn = QPushButton(action_text)
+        self.action_btn.setProperty("variant", "primary")
+        self.action_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.action_btn.clicked.connect(self.action_clicked.emit)
 
-        self.helper_lbl = QLabel(
-            "By voting, you certify that you have reviewed the technical "
-            "specifications and impact reports."
-        )
+        self.helper_lbl = QLabel(helper_text)
         self.helper_lbl.setProperty("role", "solution-side-helper")
         self.helper_lbl.setWordWrap(True)
         self.helper_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
 
-        layout.addWidget(self.status_kicker_lbl)
         layout.addLayout(top_row)
+        layout.addWidget(self.primary_value_lbl)
         layout.addWidget(self.progress_track)
-        layout.addWidget(self.quorum_lbl)
+        layout.addWidget(self.meta_lbl)
         layout.addSpacing(10)
-        layout.addWidget(self.vote_btn)
+        layout.addWidget(self.action_btn)
         layout.addWidget(self.helper_lbl)
 
+        self._progress_ratio = 0.0
+        self.set_action_button_enabled(action_enabled)
+        self.set_status(status)
+        self.set_progress_ratio(progress_ratio)
+
+    def set_panel_content(
+        self,
+        *,
+        primary_value_text: str | None = None,
+        status: SolutionSidePanelStatus | None | object = _UNSET,
+        helper_text: str | None = None,
+        action_enabled: bool | None = None,
+        progress_ratio: float | None = None,
+    ) -> None:
+        if primary_value_text is not None:
+            self.set_primary_value_text(primary_value_text)
+        if status is not _UNSET:
+            self.set_status(status)
+        if helper_text is not None:
+            self.set_helper_text(helper_text)
+        if action_enabled is not None:
+            self.set_action_button_enabled(action_enabled)
+        if progress_ratio is not None:
+            self.set_progress_ratio(progress_ratio)
+
+    def set_primary_value_text(self, text: str) -> None:
+        self.primary_value_lbl.setText(text)
+
+    def set_status(self, status: SolutionSidePanelStatus | None) -> None:
+        if status is None:
+            self.status_pill_lbl.clear()
+            self.status_pill_lbl.hide()
+            return
+
+        self.status_pill_lbl.setText(status.value.upper())
+        self.status_pill_lbl.setProperty("status", status)
+        self.status_pill_lbl.style().unpolish(self.status_pill_lbl)
+        self.status_pill_lbl.style().polish(self.status_pill_lbl)
+        self.status_pill_lbl.show()
+
+    def set_helper_text(self, text: str) -> None:
+        self.helper_lbl.setText(text)
+
+    def set_action_button_enabled(self, enabled: bool) -> None:
+        self.action_btn.setEnabled(enabled)
+
+    def set_meta_text(self, text: str) -> None:
+        self.meta_lbl.setText(text)
+
+    def set_progress_ratio(self, ratio: float) -> None:
+        self._progress_ratio = max(0.0, min(1.0, ratio))
+        self._apply_progress_ratio()
+
+    def resizeEvent(self, event: QResizeEvent) -> None:
+        super().resizeEvent(event)
+        self._apply_progress_ratio()
+
+    def _apply_progress_ratio(self) -> None:
+        track_width = self.progress_track.contentsRect().width()
+        if track_width <= 0:
+            track_width = self.progress_track.width()
+        self.progress_fill.setFixedWidth(int(track_width * self._progress_ratio))
+
+
+class SolutionVotePanel(SolutionSidePanel):
+    voted = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(
+            kicker_text="SOLUTION VOTES",
+            primary_value_text="0",
+            status=SolutionSidePanelStatus.OPEN,
+            meta_text=f"Target: {SOLUTION_VOTE_TARGET} votes",
+            action_text="Vote for this solution",
+            helper_text=(
+                "By voting, you certify that you have reviewed the technical "
+                "specifications and impact reports."
+            ),
+            action_enabled=False,
+            progress_ratio=0.0,
+            parent=parent,
+        )
+        self.action_clicked.connect(self.voted.emit)
+
     def set_votes(self, votes: int) -> None:
-        self.vote_count_lbl.setText(str(votes))
+        status = (
+            SolutionSidePanelStatus.COMPLETED
+            if votes >= SOLUTION_VOTE_TARGET
+            else SolutionSidePanelStatus.OPEN
+        )
+        self.set_panel_content(
+            primary_value_text=str(votes),
+            status=status,
+            progress_ratio=self._progress_ratio_for_votes(votes),
+        )
 
     def set_vote_button_enabled(self, enabled: bool) -> None:
-        self.vote_btn.setEnabled(enabled)
+        self.set_action_button_enabled(enabled)
+
+    @staticmethod
+    def _progress_ratio_for_votes(votes: int) -> float:
+        if SOLUTION_VOTE_TARGET <= 0:
+            return 0.0
+        return votes / SOLUTION_VOTE_TARGET
+
+
+class SolutionFundingPanel(SolutionSidePanel):
+    create_pledge_requested = Signal()
+
+    def __init__(self, parent: QWidget | None = None):
+        super().__init__(
+            kicker_text="FUNDING POOL",
+            primary_value_text="--",
+            status=None,
+            meta_text="Target: --",
+            action_text="Create pledge",
+            helper_text="Funding campaign details will appear here.",
+            action_enabled=False,
+            progress_ratio=0.0,
+            parent=parent,
+        )
+        self._target_sats: int | None = None
+        self.action_clicked.connect(self.create_pledge_requested.emit)
+
+    def show_placeholder(self) -> None:
+        self._set_target_sats(None)
+        self.set_panel_content(
+            primary_value_text="--",
+            status=None,
+            helper_text="Funding campaign details will appear here.",
+            action_enabled=False,
+            progress_ratio=0.0,
+        )
+
+    def show_state(self, state: SolutionFundingPanelState) -> None:
+        if not state.has_campaign:
+            self.show_placeholder()
+            return
+
+        raised_sats = state.raised_sats if state.raised_sats is not None else 0
+        target_sats = state.target_sats if state.target_sats is not None else 0
+        pledge_count = state.valid_pledge_count if state.valid_pledge_count is not None else 0
+        deadline_text = (
+            f"Deadline: block {state.deadline_height}"
+            if state.deadline_height is not None
+            else "Deadline: --"
+        )
+        payout_text = (
+            state.payout_address
+            if len(state.payout_address) <= 20
+            else f"{state.payout_address[:10]}...{state.payout_address[-8:]}"
+        )
+
+        fill_ratio = (raised_sats / target_sats) if target_sats > 0 else 0.0
+        self._set_target_sats(state.target_sats)
+        self.set_panel_content(
+            primary_value_text=self._format_sats(raised_sats),
+            status=state.status,
+            helper_text=f"{deadline_text}\nPledges: {pledge_count}\nPayout: {payout_text or '--'}",
+            action_enabled=state.can_create_pledge,
+            progress_ratio=fill_ratio,
+        )
+
+    @staticmethod
+    def _format_sats(value_sats: int) -> str:
+        return f"{value_sats:,} sats"
+
+    def _set_target_sats(self, target_sats: int | None) -> None:
+        if self._target_sats == target_sats:
+            return
+
+        self._target_sats = target_sats
+        self.set_meta_text(
+            f"Target: {self._format_sats(target_sats)}"
+            if target_sats is not None
+            else "Target: --"
+        )
 
 
 class CodeVerificationCard(QFrame):
@@ -147,6 +352,7 @@ class SolutionDetailWidget(QWidget):
     back_clicked = Signal()
     voted = Signal(object)
     code_verification_clicked = Signal(object)
+    create_pledge_requested = Signal(object)
 
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
@@ -281,8 +487,11 @@ class SolutionDetailWidget(QWidget):
 
         self.vote_panel = SolutionVotePanel()
         self.vote_panel.voted.connect(self._vote_solution)
+        self.funding_panel = SolutionFundingPanel()
+        self.funding_panel.create_pledge_requested.connect(self._request_create_pledge)
 
         right_col.addWidget(self.vote_panel)
+        right_col.addWidget(self.funding_panel)
         right_col.addStretch()
 
         header_row.addLayout(left_col, 1)
@@ -298,7 +507,11 @@ class SolutionDetailWidget(QWidget):
     def _set_enabled(self, enabled: bool) -> None:
         self.vote_panel.set_vote_button_enabled(enabled)
 
-    def show_solution(self, solution_with_votes: SolutionWithVotes) -> None:
+    def show_solution(
+        self,
+        solution_with_votes: SolutionWithVotes,
+        funding_state: SolutionFundingPanelState | None = None,
+    ) -> None:
         self._current_solution = solution_with_votes
         self.current_solution_id = solution_with_votes.solution.id
 
@@ -313,6 +526,10 @@ class SolutionDetailWidget(QWidget):
         self.time_since_lbl.setText(self._format_created_at(solution.created_at))
         self.desc_lbl.setText(solution.description or "No description provided.")
         self.vote_panel.set_votes(solution_with_votes.votes)
+        if funding_state is None:
+            self.funding_panel.show_placeholder()
+        else:
+            self.funding_panel.show_state(funding_state)
 
         self._set_enabled(True)
 
@@ -323,6 +540,10 @@ class SolutionDetailWidget(QWidget):
     def _on_code_verification_clicked(self) -> None:
         if self.current_solution_id is not None:
             self.code_verification_clicked.emit(self.current_solution_id)
+
+    def _request_create_pledge(self) -> None:
+        if self.current_solution_id is not None:
+            self.create_pledge_requested.emit(self.current_solution_id)
 
     def _format_created_at(self, created_at) -> str:
         now = datetime.now(timezone.utc)

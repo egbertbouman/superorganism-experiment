@@ -7,19 +7,32 @@ from uuid import UUID
 from PySide6.QtCore import QTimer, Qt
 from PySide6.QtWidgets import QMainWindow, QWidget, QHBoxLayout, QStackedWidget
 
+from bitcoin.rpc_errors import BitcoinRpcError
 from config import UI_REFRESH_DELAY
 from democracy.democracy_service import DemocracyService
+from democracy.funding.models import FundingCampaign
+from democracy.funding.service import FundingService
+from democracy.funding.service import FundingStatus
 from democracy.models.person import Person
+from democracy.models.solution import Solution
 from ui.models.issue_draft import IssueDraft
+from ui.models.pledge_draft import PledgeDraft
+from ui.models.signed_pledge_draft import SignedPledgeDraft
 from ui.models.solution_draft import SolutionDraft
-from ui.widgets.create_issue_overlay import CreateIssueOverlay
-from ui.widgets.create_solution_overlay import CreateSolutionOverlay
 from ui.widgets.fleet_widget import FleetWidget
 from ui.widgets.issue_details import IssueDetailWidget
 from ui.widgets.issue_overview import IssuesOverviewWidget
 from ui.widgets.ltr_community_widget import LTRCommunityWidget
+from ui.widgets.overlays.create_issue_overlay import CreateIssueOverlay
+from ui.widgets.overlays.create_pledge_overlay import CreatePledgeOverlay, \
+    PledgeOverlayContext, PendingPledgeRequest
+from ui.widgets.overlays.create_solution_overlay import CreateSolutionOverlay
 from ui.widgets.sidebar import SidebarWidget
-from ui.widgets.solution_details import SolutionDetailWidget
+from ui.widgets.solution_details import (
+    SolutionDetailWidget,
+    SolutionFundingPanelState,
+    SolutionSidePanelStatus,
+)
 from ui.widgets.torrents_widget import TorrentsWidget
 
 from crowdsourced_learn_to_rank.ltr_community_thread import LTRCommunityThread
@@ -50,6 +63,7 @@ class Application(QMainWindow):
         self,
         user: Person,
         democracy_service: DemocracyService,
+        funding_service: FundingService,
         health_thread: TorrentHealthThread,
         parent: Optional[QWidget] = None,
     ):
@@ -57,6 +71,7 @@ class Application(QMainWindow):
 
         self.user = user
         self.democracy_service = democracy_service
+        self.funding_service = funding_service
 
         self._health_thread = health_thread
 
@@ -112,6 +127,9 @@ class Application(QMainWindow):
         self.solution_detail_page.code_verification_clicked.connect(
             self._on_code_verification_clicked
         )
+        self.solution_detail_page.create_pledge_requested.connect(
+            self._open_create_pledge_overlay
+        )
 
         self.torrents_page = TorrentsWidget()
         self.fleet_page = FleetWidget()
@@ -159,6 +177,19 @@ class Application(QMainWindow):
         self.create_solution_overlay.created.connect(self._on_create_solution)
         self.create_solution_overlay.hide()
 
+        self.create_pledge_overlay = CreatePledgeOverlay(root)
+        self.create_pledge_overlay.pledge_request_requested.connect(
+            self._on_create_pledge_request
+        )
+        self.create_pledge_overlay.signed_pledge_submitted.connect(
+            self._on_submit_signed_pledge
+        )
+        self.create_pledge_overlay.closed.connect(self._on_create_pledge_overlay_closed)
+        self.create_pledge_overlay.hide()
+
+        self._pledge_overlay_context: Optional[PledgeOverlayContext] = None
+        self._pending_pledge_request: Optional[PendingPledgeRequest] = None
+
         # Initial load
         self.refresh()
 
@@ -185,6 +216,15 @@ class Application(QMainWindow):
                     current_id
                 )
                 self.issue_detail_page.show_issue(issue, solutions)
+
+        current_solution_id = self.solution_detail_page.current_solution_id
+        if current_solution_id:
+            solution = self.democracy_service.get_solution_with_votes(current_solution_id)
+            if solution:
+                self.solution_detail_page.show_solution(
+                    solution,
+                    self._build_solution_funding_state(current_solution_id),
+                )
 
     def schedule_refresh(self) -> None:
         """
@@ -272,8 +312,175 @@ class Application(QMainWindow):
             return
 
         self._current_parent_issue_id = issue_id
-        self.solution_detail_page.show_solution(solution)
+        self.solution_detail_page.show_solution(
+            solution,
+            self._build_solution_funding_state(solution_id),
+        )
         self.content_stack.setCurrentWidget(self.solution_detail_page)
+
+    def _build_solution_funding_state(
+        self,
+        solution_id: UUID,
+    ) -> SolutionFundingPanelState:
+        campaign = self.funding_service.repository.get_campaign_for_solution(solution_id)
+        if campaign is None or not campaign.is_active:
+            return SolutionFundingPanelState(has_campaign=False)
+
+        try:
+            funding_status = self.funding_service.compute_funding_status(
+                campaign_id=campaign.id,
+                fee_buffer_sats=0,
+            )
+        except (BitcoinRpcError, ValueError):
+            logger.exception(
+                "Failed to compute funding status for solution %s and campaign %s.",
+                solution_id,
+                campaign.id,
+            )
+            return self._build_funding_state_without_live_status(campaign)
+
+        return self._build_funding_state_from_status(campaign, funding_status)
+
+    @staticmethod
+    def _build_funding_state_without_live_status(
+        campaign: FundingCampaign,
+    ) -> SolutionFundingPanelState:
+        return SolutionFundingPanelState(
+            has_campaign=True,
+            can_create_pledge=True,
+            raised_sats=0,
+            target_sats=campaign.asking_price_sats,
+            valid_pledge_count=0,
+            deadline_height=campaign.deadline_height,
+            payout_address=campaign.developer_payout_address or "",
+            status=SolutionSidePanelStatus.OPEN,
+        )
+
+    @staticmethod
+    def _build_funding_state_from_status(
+        campaign: FundingCampaign,
+        funding_status: FundingStatus,
+    ) -> SolutionFundingPanelState:
+        if funding_status.is_fundable:
+            status = SolutionSidePanelStatus.COMPLETED
+        elif funding_status.is_expired:
+            status = SolutionSidePanelStatus.EXPIRED
+        else:
+            status = SolutionSidePanelStatus.OPEN
+
+        return SolutionFundingPanelState(
+            has_campaign=True,
+            can_create_pledge=not funding_status.is_expired,
+            raised_sats=funding_status.valid_pledge_total_sats,
+            target_sats=funding_status.required_total_sats,
+            valid_pledge_count=funding_status.valid_pledge_count,
+            deadline_height=campaign.deadline_height,
+            payout_address=campaign.developer_payout_address or "",
+            status=status,
+        )
+
+    def _open_create_pledge_overlay(self, solution_id: UUID) -> None:
+        context = self._build_pledge_overlay_context(solution_id)
+        if context is None:
+            logger.warning(
+                "Cannot open pledge overlay for solution %s because no active funding campaign exists.",
+                solution_id,
+            )
+            return
+
+        self._pledge_overlay_context = context
+        self._pending_pledge_request = None
+        self.create_pledge_overlay.open_overlay(context)
+
+    def _build_pledge_overlay_context(
+        self,
+        solution_id: UUID,
+    ) -> Optional[PledgeOverlayContext]:
+        solution_with_votes = self.democracy_service.get_solution_with_votes(solution_id)
+        if solution_with_votes is None:
+            return None
+
+        campaign = self.funding_service.repository.get_campaign_for_solution(solution_id)
+        if campaign is None or not campaign.is_active:
+            return None
+
+        funding_state = self._build_solution_funding_state(solution_id)
+        raised_sats = funding_state.raised_sats or 0
+        target_sats = funding_state.target_sats or campaign.asking_price_sats
+
+        return PledgeOverlayContext(
+            campaign_id=campaign.id,
+            solution_title=solution_with_votes.solution.title,
+            asking_price_sats=target_sats,
+            raised_sats=raised_sats,
+            deadline_height=campaign.deadline_height,
+            payout_address=campaign.developer_payout_address or "",
+            status_text=(funding_state.status or SolutionSidePanelStatus.OPEN).value.upper(),
+        )
+
+    def _on_create_pledge_request(self, draft: PledgeDraft) -> None:
+        if self._pledge_overlay_context is None:
+            logger.warning("Ignoring pledge request because no pledge overlay context is active.")
+            return
+
+        errors = draft.validate()
+        if errors:
+            return
+
+        try:
+            pledge_request = self.funding_service.create_pledge_request(
+                campaign_id=self._pledge_overlay_context.campaign_id,
+                pledger_id=self.user.id,
+                txid=draft.normalized_txid,
+                vout=draft.normalized_vout,
+            )
+        except (BitcoinRpcError, ValueError) as exc:
+            print(f"Failed to create pledge request: {exc}")
+            logger.exception(
+                "Failed to create pledge request for campaign %s.",
+                self._pledge_overlay_context.campaign_id,
+            )
+            return
+
+        self._pending_pledge_request = PendingPledgeRequest(
+            txid=draft.normalized_txid,
+            vout=draft.normalized_vout,
+            pledge_request=pledge_request,
+        )
+        self.create_pledge_overlay.show_signing_step(self._pending_pledge_request)
+
+    def _on_submit_signed_pledge(self, draft: SignedPledgeDraft) -> None:
+        if self._pending_pledge_request is None:
+            logger.warning("Ignoring signed pledge submission because no pending pledge request exists.")
+            return
+
+        errors = draft.validate()
+        if errors:
+            return
+
+        try:
+            pledge = self.funding_service.submit_signed_pledge(
+                campaign_id=self._pending_pledge_request.pledge_request.campaign_id,
+                pledger_id=self.user.id,
+                txid=self._pending_pledge_request.txid,
+                vout=self._pending_pledge_request.vout,
+                signed_pledge_psbt=draft.normalized_signed_pledge_psbt,
+            )
+        except (BitcoinRpcError, ValueError) as exc:
+            print(f"Failed to submit signed pledge: {exc}")
+            logger.exception(
+                "Failed to submit signed pledge for campaign %s.",
+                self._pending_pledge_request.pledge_request.campaign_id,
+            )
+            return
+
+        print(pledge)
+        self.create_pledge_overlay.close_overlay()
+        self.refresh()
+
+    def _on_create_pledge_overlay_closed(self) -> None:
+        self._pending_pledge_request = None
+        self._pledge_overlay_context = None
 
     def _set_active_nav(self, active_name: str) -> None:
         self.sidebar.set_active_by_name(active_name)
@@ -308,13 +515,87 @@ class Application(QMainWindow):
         if errors:
             return
 
-        self.democracy_service.create_solution(
+        has_explicit_inactive_campaign = (
+            draft.asking_price_satoshis == "0"
+            and not draft.bitcoin_payout_address
+            and not draft.deadline_height_offset
+        )
+        if (
+            not has_explicit_inactive_campaign
+            and any(
+                (
+                    draft.bitcoin_payout_address,
+                    draft.asking_price_satoshis,
+                    draft.deadline_height_offset,
+                )
+            )
+        ):
+            try:
+                self.funding_service.bitcoin_rpc.get_block_count()
+            except BitcoinRpcError:
+                logger.exception(
+                    "Failed to preflight funding campaign creation for issue %s.",
+                    self._solution_target_issue_id,
+                )
+                return
+
+        solution = self.democracy_service.create_solution(
             title=draft.title,
             description=draft.description,
             creator_id=self.user.id,
             issue_id=self._solution_target_issue_id,
         )
+        self._create_campaign_for_solution(solution, draft)
         self.refresh()
+
+    def _create_campaign_for_solution(
+        self,
+        solution: Solution,
+        draft: SolutionDraft,
+    ) -> None:
+        asking_price_sats = 0
+        deadline_height_offset: int | None = None
+        developer_payout_address: str | None = None
+        has_explicit_inactive_campaign = (
+            draft.asking_price_satoshis == "0"
+            and not draft.bitcoin_payout_address
+            and not draft.deadline_height_offset
+        )
+
+        if (
+            not has_explicit_inactive_campaign
+            and any(
+                (
+                    draft.bitcoin_payout_address,
+                    draft.asking_price_satoshis,
+                    draft.deadline_height_offset,
+                )
+            )
+        ):
+            try:
+                asking_price_sats = int(draft.asking_price_satoshis)
+                deadline_height_offset = int(draft.deadline_height_offset)
+            except ValueError:
+                logger.warning(
+                    "Failed to parse funding campaign fields for solution %s.",
+                    solution.id,
+                )
+                return
+
+            developer_payout_address = draft.bitcoin_payout_address
+
+        try:
+            self.funding_service.create_campaign(
+                solution=solution,
+                developer_payout_address=developer_payout_address,
+                asking_price_sats=asking_price_sats,
+                deadline_height_offset=deadline_height_offset,
+            )
+        except (BitcoinRpcError, ValueError):
+            logger.exception(
+                "Failed to create funding campaign for solution %s.",
+                solution.id,
+            )
 
     def _show_issue_detail_page_for_current_issue(self) -> None:
         current_id = self.issue_detail_page.current_issue_id

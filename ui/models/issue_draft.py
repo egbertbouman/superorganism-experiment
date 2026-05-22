@@ -4,7 +4,7 @@ from ui.constants import (
     ISSUE_TITLE_MIN_LENGTH,
     ISSUE_TITLE_MAX_LENGTH,
     ISSUE_DESCRIPTION_MIN_LENGTH,
-    ISSUE_DESCRIPTION_MAX_LENGTH
+    ISSUE_DESCRIPTION_MAX_LENGTH,
 )
 
 
@@ -13,35 +13,38 @@ class IssueDraft:
     title: str
     description: str
 
-    def normalized(self) -> "IssueDraft":
-        return IssueDraft(
-            title=self.title.strip(),
-            description=self.description.strip(),
-        )
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "title", self.title.strip())
+        object.__setattr__(self, "description", self.description.strip())
+
+    def validate_title(self) -> str:
+        if not self.title:
+            return "Title is required."
+        if len(self.title) < ISSUE_TITLE_MIN_LENGTH:
+            return f"Title must be at least {ISSUE_TITLE_MIN_LENGTH} characters."
+        if len(self.title) > ISSUE_TITLE_MAX_LENGTH:
+            return f"Title must be at most {ISSUE_TITLE_MAX_LENGTH} characters."
+        return ""
+
+    def validate_description(self) -> str:
+        if not self.description:
+            return "Description is required."
+        if len(self.description) < ISSUE_DESCRIPTION_MIN_LENGTH:
+            return f"Description must be at least {ISSUE_DESCRIPTION_MIN_LENGTH} characters."
+        if len(self.description) > ISSUE_DESCRIPTION_MAX_LENGTH:
+            return f"Description must be at most {ISSUE_DESCRIPTION_MAX_LENGTH} characters."
+        return ""
 
     def validate(self) -> dict[str, str]:
         errors: dict[str, str] = {}
 
-        title = self.title.strip()
-        description = self.description.strip()
+        title_error = self.validate_title()
+        if title_error:
+            errors["title"] = title_error
 
-        if not title:
-            errors["title"] = "Title is required."
-        elif len(title) < ISSUE_TITLE_MIN_LENGTH:
-            errors["title"] = f"Title must be at least {ISSUE_TITLE_MIN_LENGTH} characters."
-        elif len(title) > ISSUE_TITLE_MAX_LENGTH:
-            errors["title"] = f"Title must be at most {ISSUE_TITLE_MAX_LENGTH} characters."
-
-        if not description:
-            errors["description"] = "Description is required."
-        elif len(description) < ISSUE_DESCRIPTION_MIN_LENGTH:
-            errors["description"] = (
-                f"Description must be at least {ISSUE_DESCRIPTION_MIN_LENGTH} characters."
-            )
-        elif len(description) > ISSUE_DESCRIPTION_MAX_LENGTH:
-            errors["description"] = (
-                f"Description must be at most {ISSUE_DESCRIPTION_MAX_LENGTH} characters."
-            )
+        description_error = self.validate_description()
+        if description_error:
+            errors["description"] = description_error
 
         return errors
 

@@ -14,9 +14,17 @@ sys.path.insert(0, str(Path(__file__).parent / "torrent_health_and_investment"))
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication
 
-from config import COMMUNICATION_INTERVAL, DATA_PATH
+from bitcoin.rpc_client import BitcoinRpcClient
+from config import (
+    COMMUNICATION_INTERVAL,
+    DATA_PATH,
+    FUNDING_MIN_CONFIRMATIONS,
+    NETWORK_ID,
+    REGTEST_RPC_CONFIG,
+)
 from democracy.democracy_service import DemocracyService
 from democracy.event_publisher import DemocracyEventPublisher
+from democracy.funding.service import FundingService
 from democracy.models.person import Person
 from democracy.network.ipv8_thread import IPv8Thread
 from democracy.storage.repository_factory import DemocracyRepositoryFactory
@@ -128,10 +136,18 @@ def main() -> None:
         ui_repository,
         publisher,
     )
+    bitcoin_rpc = BitcoinRpcClient.from_config(REGTEST_RPC_CONFIG)
+    funding_service = FundingService(
+        ui_repository,
+        bitcoin_rpc,
+        network_id=NETWORK_ID,
+        min_confirmations=FUNDING_MIN_CONFIRMATIONS,
+    )
 
     window = Application(
         user,
         democracy_service,
+        funding_service,
         health_thread,
     )
 
@@ -165,6 +181,7 @@ def main() -> None:
         if worker is not None:
             worker.stop()
             worker.wait(1000)
+        bitcoin_rpc.close()
         ui_repository.close()
 
 

@@ -237,6 +237,10 @@ QWidget#createIssueOverlay {
     background-color: transparent;
 }
 
+QWidget#createPledgeOverlay {
+    background-color: transparent;
+}
+
 QWidget#overlay {
     background-color: rgba(0, 0, 0, 150);
 }
@@ -277,6 +281,52 @@ QLabel[role="counter-label"] {
 QLabel[role="counter-label"][over-limit="true"] {
     color: #fca5a5;
     font-weight: 600;
+}
+
+QLabel[role="dialog-copy"] {
+    color: #cbd5e1;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+QLabel[role="dialog-note"] {
+    color: #f5d0fe;
+    font-size: 13px;
+    line-height: 1.55;
+}
+
+QFrame[role="payment-address-card"] {
+    background-color: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 14px;
+}
+
+QLabel[role="payment-address-label"] {
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 1.8px;
+}
+
+QLabel[role="payment-address-value"] {
+    color: #f8fafc;
+    font-size: 14px;
+    font-weight: 500;
+    line-height: 1.45;
+}
+
+QPushButton[variant="icon-square"] {
+    background-color: rgba(255, 255, 255, 0.16);
+    color: #f4f4f5;
+    border: none;
+    border-radius: 8px;
+    font-size: 16px;
+    font-weight: 700;
+    padding: 0;
+}
+
+QPushButton[variant="icon-square"]:hover {
+    background-color: rgba(255, 255, 255, 0.22);
 }
 
 /* =========================================================
@@ -734,7 +784,7 @@ QLabel[role="solution-section-kicker"] {
     padding-bottom: 10px;
 }
 
-QFrame[variant="solution-vote-panel"] {
+QFrame[variant="solution-side-panel"] {
     background-color: rgba(255, 255, 255, 0.04);
     border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 22px;
@@ -748,11 +798,33 @@ QLabel[role="solution-side-votes"] {
     font-weight: 800;
 }
 
-QLabel[role="solution-side-status"] {
-    color: #b6a0ff;
-    font-size: 15px;
-    font-weight: 700;
-    padding-bottom: 6px;
+QLabel[role="solution-side-status-pill"] {
+    border-radius: 10px;
+    padding-left: 10px;
+    padding-right: 10px;
+    min-height: 20px;
+    max-height: 20px;
+    font-size: 9px;
+    font-weight: 800;
+    letter-spacing: 1.2px;
+}
+
+QLabel[role="solution-side-status-pill"][status="open"] {
+    background-color: rgba(139, 92, 246, 0.12);
+    color: #c4b5fd;
+    border: 1px solid rgba(139, 92, 246, 0.35);
+}
+
+QLabel[role="solution-side-status-pill"][status="completed"] {
+    background-color: rgba(34, 197, 94, 0.12);
+    color: #86efac;
+    border: 1px solid rgba(34, 197, 94, 0.35);
+}
+
+QLabel[role="solution-side-status-pill"][status="expired"] {
+    background-color: rgba(239, 68, 68, 0.12);
+    color: #fca5a5;
+    border: 1px solid rgba(239, 68, 68, 0.35);
 }
 
 QLabel[role="solution-side-meta"] {
