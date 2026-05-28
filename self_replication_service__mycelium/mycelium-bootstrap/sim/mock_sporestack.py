@@ -225,7 +225,7 @@ def _get_bootstrap_ip() -> Optional[str]:
 def _lxc_init_and_start(machine_id: str) -> Tuple[str, str]:
     """`lxc init mycelium-base <id>` + `lxc start <id>`, then poll for IPv4."""
     _run_cli(["lxc", "init", LXC_BASE_IMAGE, machine_id], timeout=60)
-    _run_cli(["lxc", "start", machine_id], timeout=30)
+    _run_cli(["lxc", "start", machine_id], timeout=60)
 
     deadline = time.time() + LXC_PROVISION_TIMEOUT_S
     while time.time() < deadline:
@@ -273,7 +273,7 @@ def _lxc_pgrep_main(machine_id: str) -> bool:
     try:
         subprocess.run(
             ["lxc", "exec", machine_id, "--", "pgrep", "-f", "python.*main.py"],
-            check=True, capture_output=True, text=True, timeout=10,
+            check=True, capture_output=True, text=True, timeout=30,
         )
         return True
     except Exception:
@@ -281,23 +281,23 @@ def _lxc_pgrep_main(machine_id: str) -> bool:
 
 
 def _btc_new_address() -> str:
-    return _run_cli(BCLI + ["getnewaddress"], timeout=10)
+    return _run_cli(BCLI + ["getnewaddress"], timeout=60)
 
 
 def _btc_received_by_address(addr: str) -> float:
-    return float(_run_cli(BCLI + ["getreceivedbyaddress", addr, "0"], timeout=10))
+    return float(_run_cli(BCLI + ["getreceivedbyaddress", addr, "0"], timeout=60))
 
 
 def _btc_force_confirm() -> None:
-    coinbase = _run_cli(BCLI + ["getnewaddress"], timeout=10)
-    _run_cli(BCLI + ["generatetoaddress", "1", coinbase], timeout=10)
+    coinbase = _run_cli(BCLI + ["getnewaddress"], timeout=60)
+    _run_cli(BCLI + ["generatetoaddress", "1", coinbase], timeout=60)
 
 
 def _btc_txid_for_address(addr: str) -> str:
     try:
         out = _run_cli(
             BCLI + ["listreceivedbyaddress", "0", "true", "false", addr],
-            timeout=10,
+            timeout=60,
         )
         entries = json.loads(out)
         if entries and entries[0].get("txids"):
@@ -512,7 +512,7 @@ def _force_kill_lxc(machine_id: str) -> Tuple[bool, bool]:
         try:
             r = subprocess.run(
                 ["lxc", "stop", "--force", machine_id],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=30,
             )
             last_stop_rc = r.returncode
             last_stop_err = (r.stderr or "").strip()
@@ -525,7 +525,7 @@ def _force_kill_lxc(machine_id: str) -> Tuple[bool, bool]:
         try:
             r = subprocess.run(
                 ["lxc", "delete", "--force", machine_id],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=30,
             )
             last_delete_rc = r.returncode
             last_delete_err = (r.stderr or "").strip()

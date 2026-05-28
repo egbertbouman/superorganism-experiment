@@ -4,7 +4,6 @@ set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 BTC_DATADIR="${HOME}/.mycelium-sim/regtest"
-mkdir -p "${BTC_DATADIR}"
 
 # Preflight: required binaries.
 for bin in bitcoind electrs bitcoin-cli; do
@@ -22,16 +21,17 @@ sleep 2
 
 BCLI=(bitcoin-cli -regtest -datadir="${BTC_DATADIR}" -rpcuser=mycelium -rpcpassword=regtest -rpcconnect=127.0.0.1 -rpcport=18443)
 
-# Wipe any leftover mempool — pkill'd shutdowns persist it, and an "unbroadcast"
-# tx left from a crashed run jams every bitcoinlib scan after.
-rm -f "${BTC_DATADIR}/regtest/mempool.dat"
+# Start every sim run from a clean chain.
+rm -rf "${BTC_DATADIR}"
+mkdir -p "${BTC_DATADIR}"
 
 # -minrelaytxfee=0/-blockmintxfee=0: bitcoinlib's auto-fee on regtest lands at
 # the boundary; without this it gets "min relay fee not met" or stuck unbroadcast.
 bitcoind -regtest -daemon -fallbackfee=0.0001 -minrelaytxfee=0 -blockmintxfee=0 -txindex \
     -datadir="${BTC_DATADIR}" \
     -rpcuser=mycelium -rpcpassword=regtest \
-    -rpcbind=127.0.0.1:18443 -rpcallowip=127.0.0.1
+    -rpcbind=127.0.0.1:18443 -rpcallowip=127.0.0.1 \
+    -rpcthreads=16 -rpcworkqueue=256
 
 # Wait for RPC to come up.
 for i in $(seq 1 30); do
@@ -63,7 +63,9 @@ electrs --network regtest \
     --electrum-rpc-addr 0.0.0.0:60401 \
     --cookie-file "${BTC_DATADIR}/electrs-auth" \
     --db-dir "${BTC_DATADIR}/electrs-db" \
-    --log-filters INFO >"${BTC_DATADIR}/electrs.log" 2>&1 &
+    --index-lookup-limit 1000 \
+    --db-parallelism 8 \
+    --log-filters WARN >"${BTC_DATADIR}/electrs.log" 2>&1 &
 echo $! >"${BTC_DATADIR}/electrs.pid"
 echo "[start.sh] waiting for electrs TCP port 60401..."
 electrs_ready=0
@@ -122,5 +124,5 @@ echo "[start.sh] bitcoind RPC: 127.0.0.1:18443"
 echo "[start.sh] electrs:      127.0.0.1:60401"
 echo "[start.sh] block height: $("${BCLI[@]}" getblockcount)"
 echo "[start.sh] balance:      $("${BCLI[@]}" -rpcwallet=mycelium-regtest getbalance) BTC"
-echo "[start.sh] mine every:   ${BTC_BLOCK_INTERVAL:-5}s"
+echo "[start.sh] idle heartbeat: ${BTC_BLOCK_INTERVAL:-60}s (mempool txs mined within ~1s)"
 echo "[start.sh] regtest stack ready"

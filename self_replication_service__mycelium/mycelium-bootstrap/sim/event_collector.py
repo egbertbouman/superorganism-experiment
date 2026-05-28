@@ -12,6 +12,7 @@ import threading
 import pathlib
 import urllib.request
 from datetime import datetime
+from typing import NamedTuple, Optional
 
 from flask import Flask, request, jsonify
 
@@ -47,11 +48,27 @@ FAUCET_RESUME_THRESHOLD = int(os.getenv("MYCELIUM_SIM_FAUCET_RESUME_THRESHOLD", 
 HEARTBEAT_INTERVAL_S    = float(os.getenv("MYCELIUM_SIM_HEARTBEAT_INTERVAL", "10"))
 LIVE_TIMEOUT_HEARTBEATS = float(os.getenv("MYCELIUM_SIM_LIVE_TIMEOUT_HEARTBEATS", "10"))
 LIVE_NODE_TIMEOUT_S     = HEARTBEAT_INTERVAL_S * LIVE_TIMEOUT_HEARTBEATS
+# A missed-heartbeat window only *triggers* a funding evaluation; the actual reap
+# is funding-gated. We project the node's last-known runway forward by the elapsed
+# wall-time (converted to sim-days) and reap only once it crosses this floor.
+REAP_RUNWAY_FLOOR_DAYS  = float(os.getenv("MYCELIUM_SIM_REAP_RUNWAY_FLOOR_DAYS", "0"))
 MOCK_SPORESTACK_URL     = os.getenv(
     "MYCELIUM_SIM_SPORESTACK_URL",
     f"http://127.0.0.1:{os.getenv('MYCELIUM_SIM_MOCK_PORT', '8766')}",
 )
-_live_nodes: dict[str, tuple[str, float]] = {}  # friendly_name -> (btc_address, last_seen_ts)
+
+
+class LiveNode(NamedTuple):
+    """Last-known state of a live node, used to gate heartbeat-window eviction on
+    projected runway rather than telemetry silence alone."""
+    addr: str
+    last_seen: float
+    total_runway_days: Optional[float] = None
+    days_remaining: Optional[float] = None
+    btc_balance_sat: float = 0.0
+
+
+_live_nodes: dict[str, LiveNode] = {}  # friendly_name -> LiveNode
 _live_lock = threading.Lock()
 
 
@@ -67,9 +84,28 @@ def _update_live_nodes(event_name: str, node: str, data: dict) -> None:
         now = time.time()
         addr = data.get("btc_address")
         with _live_lock:
-            prev_addr = _live_nodes.get(node, ("", 0.0))[0]
+            prev = _live_nodes.get(node)
+            prev_addr = prev.addr if prev else ""
             new_addr = addr if isinstance(addr, str) and addr else prev_addr
-            _live_nodes[node] = (new_addr, now)
+            # Carry the previous value forward when a field is absent from this
+            # snapshot (mirrors the prev_addr pattern) so a partial heartbeat
+            # never erases known-good runway inputs.
+            total_runway = data.get("total_runway_days")
+            if total_runway is None:
+                total_runway = prev.total_runway_days if prev else None
+            days_remaining = data.get("days_remaining")
+            if days_remaining is None:
+                days_remaining = prev.days_remaining if prev else None
+            btc_balance_sat = data.get("btc_balance_sat")
+            if btc_balance_sat is None:
+                btc_balance_sat = prev.btc_balance_sat if prev else 0.0
+            _live_nodes[node] = LiveNode(
+                addr=new_addr,
+                last_seen=now,
+                total_runway_days=total_runway,
+                days_remaining=days_remaining,
+                btc_balance_sat=btc_balance_sat,
+            )
     elif event_name == "server_expired":
         name = data.get("friendly_name") or node
         with _live_lock:
@@ -98,18 +134,53 @@ def _force_reap(name: str) -> None:
         print(f"[event_collector] force_reap {name} failed: {e}", flush=True)
 
 
+def _projected_runway_days(node: LiveNode, now: float) -> Optional[float]:
+    """Last-known total runway minus sim-days elapsed since the last heartbeat.
+    Returns None when runway can't be determined (still booting)."""
+    elapsed_sim_days = (now - node.last_seen) * TIME_SCALE / 86400.0
+    if node.total_runway_days is not None:
+        return node.total_runway_days - elapsed_sim_days
+    # Fallback: reconstruct from days_remaining + BTC reserve (mirrors node_monitor).
+    if node.days_remaining is None:
+        return None
+    runway = float(node.days_remaining)
+    if MONTHLY_COST_CENTS > 0 and BTC_USD > 0:
+        cost_per_day_cents = MONTHLY_COST_CENTS / 30.0
+        btc_cents = (node.btc_balance_sat / 1e8) * BTC_USD * 100.0
+        runway += btc_cents / cost_per_day_cents
+    return runway - elapsed_sim_days
+
+
 def _live_nodes_eviction_loop() -> None:
-    """Drop entries whose last state_snapshot is older than LIVE_NODE_TIMEOUT_S,
-    and tell mock_sporestack to kill the underlying container."""
+    """A missed-heartbeat window only triggers a funding evaluation; the reap is
+    funding-gated. Silent-but-funded nodes stay in _live_nodes and are re-evaluated
+    each cycle, reaped only once their projected runway crosses the floor. This
+    bounds how long a genuinely-crashed node lingers (≈ its last-known runway in
+    sim-time) without ever destroying a node the sim still believes is funded."""
     period = max(1.0, LIVE_NODE_TIMEOUT_S / 2)
     while True:
         time.sleep(period)
-        cutoff = time.time() - LIVE_NODE_TIMEOUT_S
+        now = time.time()
+        cutoff = now - LIVE_NODE_TIMEOUT_S
+        to_reap: list[tuple[str, float]] = []
+        spared: list[tuple[str, float]] = []
         with _live_lock:
-            stale = [n for n, (_addr, ts) in _live_nodes.items() if ts < cutoff]
-            for n in stale:
-                _live_nodes.pop(n, None)
-        for n in stale:
+            candidates = [(n, e) for n, e in _live_nodes.items() if e.last_seen < cutoff]
+            for n, e in candidates:
+                proj = _projected_runway_days(e, now)
+                if proj is None:
+                    continue  # unknown runway → wait (don't kill a booting node)
+                if proj <= REAP_RUNWAY_FLOOR_DAYS:
+                    to_reap.append((n, proj))
+                    _live_nodes.pop(n, None)
+                else:
+                    spared.append((n, proj))
+        for n, proj in spared:
+            print(f"[event_collector] silent {n} — still funded, projected "
+                  f"{proj:.2f} sim-days runway; not reaping", flush=True)
+        for n, proj in to_reap:
+            print(f"[event_collector] reaped {n} — projected runway {proj:.2f} "
+                  f"sim-days <= floor {REAP_RUNWAY_FLOOR_DAYS}", flush=True)
             _force_reap(n)
 
 
@@ -139,7 +210,7 @@ def _faucet_drip_loop() -> None:
         time.sleep(period_real_s)
         sim_days = (time.time() - sim_start_wall) * TIME_SCALE / 86400.0
         with _live_lock:
-            targets = [(name, addr) for name, (addr, _ts) in _live_nodes.items()]
+            targets = [(name, e.addr) for name, e in _live_nodes.items()]
         active = len(targets)
 
         if not paused and active >= FAUCET_PAUSE_THRESHOLD:

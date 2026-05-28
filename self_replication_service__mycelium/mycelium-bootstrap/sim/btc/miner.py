@@ -1,7 +1,11 @@
 #!/usr/bin/env python3
-"""Regtest miner daemon: drains the mempool as fast as it fills, then falls
-back to mining empty blocks every BTC_BLOCK_INTERVAL seconds so the chain
-keeps progressing (electrs and time-scaling both depend on regular blocks)."""
+"""Regtest miner daemon: mines a block immediately whenever the mempool has
+transactions (draining it as fast as it fills), and otherwise only mines a
+single idle "heartbeat" block every BTC_BLOCK_INTERVAL seconds. Blocks are thus
+proportional to activity rather than wall-clock time, so chain height and
+coinbase history don't bloat the electrs index while the sim sits idle. A fresh
+coinbase address is used per block so no single scripthash accrues unbounded
+coinbase history. Set BTC_BLOCK_INTERVAL<=0 to disable idle blocks entirely."""
 import json
 import os
 import pathlib
@@ -9,7 +13,11 @@ import subprocess
 import sys
 import time
 
-INTERVAL = float(os.getenv("BTC_BLOCK_INTERVAL", "5"))
+# Idle heartbeat: seconds between blocks when the mempool is empty (<=0 disables
+# idle mining). The mempool is polled every POLL_S so pending txs still confirm
+# within ~1s regardless of the heartbeat length.
+HEARTBEAT_S = float(os.getenv("BTC_BLOCK_INTERVAL", "60"))
+POLL_S = 1.0
 BTC_DATADIR = pathlib.Path.home() / ".mycelium-sim" / "regtest"
 BCLI = [
     "bitcoin-cli", "-regtest", f"-datadir={BTC_DATADIR}",
@@ -28,24 +36,32 @@ def _mempool_has_txs() -> bool:
     return bool(json.loads(raw or "[]"))
 
 
+def _mine_block() -> str:
+    # Rotate the coinbase address per block (like faucet.py / mock_sporestack.py)
+    # so no single scripthash accrues unbounded coinbase history in electrs.
+    addr = _cli("-rpcwallet=mycelium-regtest", "getnewaddress")
+    return _cli("generatetoaddress", "1", addr)
+
+
 def main():
-    coinbase = _cli("-rpcwallet=mycelium-regtest", "getnewaddress")
-    print(f"[miner] mining to {coinbase}; drain on mempool, idle every {INTERVAL}s", flush=True)
+    if HEARTBEAT_S > 0:
+        print(f"[miner] drain on mempool; idle heartbeat every {HEARTBEAT_S}s", flush=True)
+    else:
+        print("[miner] drain on mempool; idle mining disabled", flush=True)
+    last_block = time.monotonic()
     while True:
         try:
-            mempool_busy = _mempool_has_txs()
-            blockhash_json = _cli("generatetoaddress", "1", coinbase)
-            print(
-                f"[miner] mined {blockhash_json}"
-                + (" (mempool drain)" if mempool_busy else ""),
-                flush=True,
-            )
-            if mempool_busy:
+            if _mempool_has_txs():
+                print(f"[miner] mined {_mine_block()} (mempool drain)", flush=True)
+                last_block = time.monotonic()
                 # Loop back immediately — keep draining until mempool is empty.
                 continue
+            if HEARTBEAT_S > 0 and time.monotonic() - last_block >= HEARTBEAT_S:
+                print(f"[miner] mined {_mine_block()} (idle heartbeat)", flush=True)
+                last_block = time.monotonic()
         except Exception as e:
             print(f"[miner] error: {e}", file=sys.stderr, flush=True)
-        time.sleep(INTERVAL)
+        time.sleep(POLL_S)
 
 
 if __name__ == "__main__":

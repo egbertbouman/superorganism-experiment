@@ -150,6 +150,7 @@ class Orchestrator:
                 "btc_address": w.get_receiving_address() if w else "",
                 "btc_balance_sat": ns.btc_balance_sat if ns else 0,
                 "days_remaining": ns.days_remaining if ns else None,
+                "total_runway_days": ns.total_runway_days if ns else None,
                 "caution_trait": ps.get_caution_trait() if ps else 0.5,
                 "peer_count": live_peers,
                 "spawn_in_progress": ps.is_spawn_in_progress() if ps else False,

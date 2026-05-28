@@ -17,7 +17,7 @@ class Config:
     REPO_BRANCH: str = os.getenv("MYCELIUM_BRANCH", "main")
 
     # Timing
-    UPDATE_CHECK_INTERVAL: int = int(os.getenv("MYCELIUM_UPDATE_INTERVAL", "60"))
+    UPDATE_CHECK_INTERVAL: int = int(os.getenv("MYCELIUM_UPDATE_CHECK_INTERVAL", "60"))
     HEARTBEAT_INTERVAL: int = int(os.getenv("MYCELIUM_HEARTBEAT_INTERVAL", "300"))
 
     # Paths
@@ -69,8 +69,10 @@ class Config:
 
     # Caution trait mutation (injected by deployer at birth — same for genesis and children)
     CAUTION_MUTATION_SIGMA: float = float(os.getenv("MYCELIUM_CAUTION_MUTATION_SIGMA", "0.05"))
-    CAUTION_TRAIT_MIN: float      = float(os.getenv("MYCELIUM_CAUTION_TRAIT_MIN", "0.1"))
+    CAUTION_TRAIT_MIN: float      = float(os.getenv("MYCELIUM_CAUTION_TRAIT_MIN", "0.35"))
     CAUTION_TRAIT_MAX: float      = float(os.getenv("MYCELIUM_CAUTION_TRAIT_MAX", "0.9"))
+    CAUTION_TRAIT_TARGET: float   = float(os.getenv("MYCELIUM_CAUTION_TRAIT_TARGET", "0.5"))
+    CAUTION_MEAN_REVERSION: float = float(os.getenv("MYCELIUM_CAUTION_MEAN_REVERSION", "0.2"))
 
     # Spawn thresholds (injected by deployer; caution=0 baseline values)
     SPAWN_THRESHOLD_DAYS: int  = int(os.getenv("MYCELIUM_SPAWN_THRESHOLD_DAYS", "60"))

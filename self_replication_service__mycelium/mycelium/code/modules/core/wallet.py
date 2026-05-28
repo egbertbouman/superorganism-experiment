@@ -1,13 +1,11 @@
 """
 Local spending Bitcoin wallet for autonomous node operations.
 
-On first boot: creates wallet from MYCELIUM_BTC_MNEMONIC env var,
-persists mnemonic to disk (chmod 600), and removes the env var from
-/etc/environment. On subsequent boots: loads wallet DB from disk directly.
 """
 
 import logging
 import os
+import resource
 import threading
 import time
 from decimal import Decimal
@@ -21,10 +19,6 @@ import bitcoinlib.db as _bitcoinlib_db
 from config import Config
 from utils import setup_logger
 
-# bitcoinlib creates its SQLAlchemy engine inside Db.__init__  the
-# sqlite session is bound to the creatingthread.
-# NodeMonitor.refresh runs on a ThreadPoolExecutor (asyncio.to_thread)
-# bitcoinlib.db.create_engine adds check_same_thread=False;
 _orig_create_engine = _bitcoinlib_db.create_engine
 
 def _create_engine_thread_safe(url, *args, **kwargs):
@@ -39,9 +33,6 @@ _bitcoinlib_db.create_engine = _create_engine_thread_safe
 if Config.SIM_MODE:
     import asyncio as _asyncio
     import socket as _socket
-    # Default 5s is too tight when N containers all fan-out wallet.scan() at the
-    # single host electrs — queue stretches past 5s, aiorpcx aborts client-side.
-    # Rewrite the BaseClient.__init__ defaults tuple (the 5 there is unique).
     from bitcoinlib.services.baseclient import BaseClient as _BaseClient
     _BaseClient.__init__.__defaults__ = tuple(
         60 if d == 5 else d for d in _BaseClient.__init__.__defaults__
@@ -96,16 +87,10 @@ if Config.SIM_MODE:
 
 _wallet_lock = threading.RLock()
 
-# Sim-mode retry knobs for the pre-send UTXO refresh. Host's _scan_until_funded
-# uses 20 attempts × 3s; we use a tighter cadence here because the parent's
-# tx is already in mempool by the time send() runs, so the relevant lag is
-# electrs's listunspent indexing, which is usually sub-second.
 _SIM_SEND_SCAN_ATTEMPTS = 20
 _SIM_SEND_SCAN_DELAY = 1.5
-# Mirrors spawn_identity._ESTIMATED_FEE_SAT_MAX — the conservative fee buffer
-# the caller's balance check already uses, kept in sync so we stop polling
-# once we have enough confirmed UTXOs to actually build the tx.
 _SIM_SEND_FEE_HEADROOM_SAT = 5_000
+_SIM_SEND_RSS_WARN_KB = 2_000_000  # 2 GB
 
 
 def _synchronized(fn):
@@ -164,10 +149,7 @@ def _remove_from_etc_environment(key: str) -> None:
 
 class SpendingWallet:
     """
-    Full spending Bitcoin wallet stored locally on the VPS.
-
-    Holds the private key on disk in a bitcoinlib wallet DB.
-    The mnemonic is also persisted to mnemonic.txt (chmod 600).
+    Full spending Bitcoin wallet stored locally.
     """
 
     def __init__(self, wallet: Wallet):
@@ -175,8 +157,12 @@ class SpendingWallet:
 
     @_synchronized
     def get_receiving_address(self) -> str:
-        """Get a receiving address for this wallet."""
-        key = self._wallet.get_key()
+        """Get a receiving address for this wallet.
+        """
+        if Config.SIM_MODE:
+            key = self._wallet.key_for_path([0, 0])  # deterministic m/84'/.../0/0, never rotates
+        else:
+            key = self._wallet.get_key()
         return key.address
 
     @_synchronized
@@ -191,36 +177,53 @@ class SpendingWallet:
 
     @_synchronized
     def scan(self) -> None:
-        """Scan blockchain for transactions and update balance."""
-        logger.info("Scanning blockchain for transactions...")
-        self._wallet.scan()
-        logger.info("Scan complete. Balance: %s BTC", self.get_balance_btc())
+        """Refresh wallet state (UTXOs + confirmations) and update balance."""
+        self._resync_spendable_utxos()
+        logger.info("Refresh complete. Balance: %s BTC", self.get_balance_btc())
+
+    def _resync_spendable_utxos(self) -> None:
+        """Bounded wallet refresh used by heartbeat scan() and pre-send."""
+        self._wallet.utxos_update(rescan_all=Config.SIM_MODE)
+
+        DbTransaction = _bitcoinlib_db.DbTransaction
+        unconfirmed_rows = (
+            self._wallet.session.query(DbTransaction.txid)
+            .filter(
+                DbTransaction.wallet_id == self._wallet.wallet_id,
+                DbTransaction.network_name == self._wallet.network.name,
+                (DbTransaction.block_height.is_(None))
+                | (DbTransaction.confirmations == 0),
+            )
+            .all()
+        )
+        txids = [row[0] for row in unconfirmed_rows if row[0]]
+        if txids:
+            self._wallet.transactions_update_by_txids(txids)
+        self._wallet.transactions_update_confirmations()
+
+        # Memory guardrail
+        peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+        if peak_kb >= _SIM_SEND_RSS_WARN_KB:
+            logger.warning(
+                "pre-send UTXO refresh peak RSS %.2f GB — refresh is bloating again, "
+                "OOM-kill risk (refreshed %d unconfirmed txid(s))",
+                peak_kb / 1_048_576, len(txids),
+            )
+        else:
+            logger.debug(
+                "pre-send UTXO refresh peak RSS %.1f MB (%d unconfirmed txid(s) refreshed)",
+                peak_kb / 1024, len(txids),
+            )
 
     @_synchronized
     def send(self, address: str, amount_satoshis: int, fee=None) -> str:
         """Send Bitcoin to address. Returns txid."""
         if Config.SIM_MODE:
-            # Sim issues many sends per minute; resync local UTXO table so coin
-            # selection doesn't pick inputs already consumed by an earlier send.
-            # scan() (not just transactions_update) is required: after a prior
-            # send, the change tx sits in the local DB with block_height=None,
-            # and transactions_update_confirmations filters on block_height>0,
-            # so confirmations stay at 0 and select_inputs (min_confirms=1)
-            # finds nothing. scan() re-fetches each confs==0 tx by txid, which
-            # restores its block_height + confirmations from the indexer.
-            #
-            # Retry loop: electrs's address.listunspent can lag address.history
-            # by seconds-to-tens-of-seconds, so a single scan+update sometimes
-            # leaves utxos() empty even though balance() reports the funds.
-            # Mirror run_simulation._scan_until_funded — poll until we see
-            # confirmed UTXOs covering amount + fee headroom, or give up with
-            # a clear error.
             needed = amount_satoshis + _SIM_SEND_FEE_HEADROOM_SAT
             last_err: Optional[Exception] = None
             for attempt in range(_SIM_SEND_SCAN_ATTEMPTS):
                 try:
-                    self._wallet.scan()
-                    self._wallet.utxos_update(rescan_all=True)
+                    self._resync_spendable_utxos()
                     utxos = self._wallet.utxos() or []
                     spendable = sum(
                         int(u.get("value", 0))
@@ -230,14 +233,14 @@ class SpendingWallet:
                     if spendable >= needed:
                         if attempt > 0:
                             logger.info(
-                                "wallet ready after %d scan(s): %d confirmed utxo(s), %d sat spendable",
+                                "wallet ready after %d refresh(es): %d confirmed utxo(s), %d sat spendable",
                                 attempt + 1,
                                 sum(1 for u in utxos if int(u.get("confirmations", 0)) >= 1),
                                 spendable,
                             )
                         break
                     logger.info(
-                        "wallet has %d utxo(s), %d sat spendable (< %d needed); scan %d/%d, retrying in %.1fs...",
+                        "wallet has %d utxo(s), %d sat spendable (< %d needed); refresh %d/%d, retrying in %.1fs...",
                         len(utxos), spendable, needed,
                         attempt + 1, _SIM_SEND_SCAN_ATTEMPTS, _SIM_SEND_SCAN_DELAY,
                     )
@@ -256,7 +259,7 @@ class SpendingWallet:
                 detail = f" (last error: {last_err})" if last_err else ""
                 raise WalletError(
                     f"No spendable UTXOs covering {needed} sat after "
-                    f"{_SIM_SEND_SCAN_ATTEMPTS} scan attempts — electrs may be "
+                    f"{_SIM_SEND_SCAN_ATTEMPTS} refresh attempts — electrs may be "
                     f"stalled or mempool tx unmined{detail}"
                 )
 
@@ -300,10 +303,6 @@ class SpendingWallet:
 
 
 # How long to keep re-querying the indexer before we accept "no prior tx exists"
-# on a reconcile path. Mempool propagation on signet/testnet can lag well beyond
-# the bitcoinlib transactions_update default; without this poll a freshly
-# broadcast tx that hasn't reached the indexer yet would be re-broadcast,
-# double-paying.
 _RECONCILE_POLL_TIMEOUT_SECONDS = 90
 _RECONCILE_POLL_INTERVAL_SECONDS = 10
 
@@ -344,13 +343,7 @@ def find_prior_send(
     address: str,
     amount_sat: int,
 ) -> Optional[str]:
-    """Poll bitcoinlib's indexer for up to _RECONCILE_POLL_TIMEOUT_SECONDS for a matching outbound tx.
-
-    A just-broadcast tx may not be visible to the indexer for seconds-to-minutes;
-    a single scan that misses it would cause a double-broadcast. None means we
-    polled to timeout and still saw nothing — caller must treat as "unknown"
-    (do NOT re-broadcast blindly).
-    """
+    """Poll bitcoinlib's indexer for up to _RECONCILE_POLL_TIMEOUT_SECONDS for a matching outbound tx."""
     start = time.time()
     while True:
         txid = scan_for_prior_send(wallet, address, amount_sat)
@@ -368,12 +361,7 @@ _wallet_instance: Optional[SpendingWallet] = None
 def initialize_wallet() -> None:
     """
     Initialize the spending wallet singleton.
-
-    First boot (no wallet DB): reads mnemonic from MYCELIUM_BTC_MNEMONIC
-    env var, creates wallet, writes mnemonic.txt (chmod 600), removes
-    env var from /etc/environment.
-
-    Subsequent boots: loads wallet DB from disk directly.
+    Later boots: loads wallet DB from disk directly.
     """
     global _wallet_instance
 
@@ -417,6 +405,9 @@ def initialize_wallet() -> None:
                 db_uri=db_uri,
                 witness_type="segwit"
             )
+            # One-time HD walk on first boot: discovers any prior activity on
+            # either chain (change=0 and change=1) under this mnemonic.
+            raw.scan(scan_gap_limit=5)
 
             if wallet_db.exists():
                 wallet_db.chmod(0o600)

@@ -118,7 +118,9 @@ def mutate_caution_trait(parent_trait: float) -> float:
     Produce a slightly mutated child caution trait via Gaussian drift.
     Called by parent at spawn time; result injected as MYCELIUM_CAUTION_TRAIT for child.
     """
-    child = parent_trait + random.gauss(0, Config.CAUTION_MUTATION_SIGMA)
+    drift = Config.CAUTION_MEAN_REVERSION * (Config.CAUTION_TRAIT_TARGET - parent_trait)
+    child = parent_trait + drift + random.gauss(0, Config.CAUTION_MUTATION_SIGMA)
     result = max(Config.CAUTION_TRAIT_MIN, min(Config.CAUTION_TRAIT_MAX, child))
-    logger.debug("Caution mutation: %.3f -> %.3f (sigma=%.3f)", parent_trait, result, Config.CAUTION_MUTATION_SIGMA)
+    logger.debug("Caution mutation: %.3f -> %.3f (drift=%.3f, sigma=%.3f)",
+                 parent_trait, result, drift, Config.CAUTION_MUTATION_SIGMA)
     return result
