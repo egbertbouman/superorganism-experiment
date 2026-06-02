@@ -461,7 +461,6 @@ class Deployer:
         env_vars["MYCELIUM_CAUTION_TRAIT_MIN"]      = "0.35"
         env_vars["MYCELIUM_CAUTION_TRAIT_MAX"]      = "0.9"
         env_vars["MYCELIUM_SPAWN_THRESHOLD_DAYS"]   = "60"
-        env_vars["MYCELIUM_SPAWN_RESERVE_DAYS"]     = "30"
         env_vars["MYCELIUM_INHERITANCE_RATIO"]      = "0.4"
         if default_btc_address:
             env_vars["MYCELIUM_DEFAULT_BTC_ADDRESS"] = default_btc_address

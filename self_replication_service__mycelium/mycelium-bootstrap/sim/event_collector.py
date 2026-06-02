@@ -3,10 +3,10 @@
 
 Accepts POST /event payloads from each container's EventLogger and appends
 """
+import base64
 import json
 import os
 import random
-import subprocess
 import time
 import threading
 import pathlib
@@ -17,7 +17,27 @@ from typing import NamedTuple, Optional
 from flask import Flask, request, jsonify
 
 SIM_DIR = pathlib.Path(__file__).resolve().parent
-FAUCET_SCRIPT = SIM_DIR / "btc" / "faucet.py"
+
+# Direct JSON-RPC to bitcoind (creds mirror sim/btc/faucet.py and miner.py). The
+# wallet-scoped path targets the same wallet faucet.py funds from. Used by the
+# daily faucet drip to issue one batched `sendmany` instead of N subprocess sends.
+BTC_RPC_URL = "http://127.0.0.1:18443/wallet/mycelium-regtest"
+_BTC_RPC_AUTH = base64.b64encode(b"mycelium:regtest").decode()
+
+
+def _btc_rpc(method: str, params: list):
+    body = json.dumps({"jsonrpc": "1.0", "id": "faucet",
+                       "method": method, "params": params}).encode()
+    req = urllib.request.Request(
+        BTC_RPC_URL, data=body, method="POST",
+        headers={"Content-Type": "application/json",
+                 "Authorization": f"Basic {_BTC_RPC_AUTH}"},
+    )
+    with urllib.request.urlopen(req, timeout=30) as resp:
+        out = json.loads(resp.read())
+    if out.get("error"):
+        raise RuntimeError(out["error"])
+    return out["result"]
 
 BIND_HOST = "0.0.0.0"  # bind to lxdbr0 too so containers can POST events from the bridge
 BIND_PORT = 8765
@@ -36,6 +56,7 @@ _lock = threading.Lock()
 TIME_SCALE              = float(os.getenv("MYCELIUM_SIM_TIME_SCALE", "1"))
 BTC_USD                 = float(os.getenv("MYCELIUM_SIM_BTC_USD", "0"))
 MONTHLY_COST_CENTS      = float(os.getenv("MYCELIUM_SIM_MONTHLY_COST_CENTS", "0"))
+FAUCET_ENABLED          = os.getenv("MYCELIUM_SIM_FAUCET_ENABLED", "true").lower() == "true"
 FAUCET_MAX_MULTIPLIER   = float(os.getenv("MYCELIUM_SIM_FAUCET_MAX_MULTIPLIER", "1.2"))
 FAUCET_MIN_FLOOR        = float(os.getenv("MYCELIUM_SIM_FAUCET_MIN_FLOOR", "0.5"))
 FAUCET_DAYS_PER_MONTH   = float(os.getenv("MYCELIUM_SIM_FAUCET_DAYS_PER_MONTH", "30"))
@@ -194,6 +215,9 @@ def _faucet_drip_loop() -> None:
     active <= RESUME_THRESHOLD. Paused ticks still log a `faucet_drip` event
     (with paused=true, total_btc=0) so analysis can see the gap.
     """
+    if not FAUCET_ENABLED:
+        print("[event_collector] faucet drip disabled (faucet_enabled=false)", flush=True)
+        return
     if BTC_USD <= 0 or MONTHLY_COST_CENTS <= 0:
         return  # faucet disabled
     period_real_s = 86400.0 / TIME_SCALE
@@ -260,18 +284,20 @@ def _faucet_drip_loop() -> None:
         s = sum(weights)
         shares = [w / s * daily_actual_btc for w in weights]
         per_node = {}
+        outputs = {}
         for (name, addr), share in zip(targets, shares):
             per_node[name] = share
             if not addr:
                 continue  # node alive but hasn't reported a BTC address yet
+            # Sum if two nodes ever report the same address — sendmany keys must
+            # be unique. 8dp = satoshi precision.
+            outputs[addr] = round(outputs.get(addr, 0.0) + share, 8)
+        if outputs:
             try:
-                subprocess.run(
-                    [str(FAUCET_SCRIPT), "send", addr, f"{share:.8f}"],
-                    check=False, timeout=30,
-                )
+                _btc_rpc("sendmany", ["", outputs])
             except Exception as e:
-                print(f"[event_collector] faucet send to {name} ({addr}) failed: {e}",
-                      flush=True)
+                print(f"[event_collector] faucet sendmany failed: {e}", flush=True)
+        # miner.py drains the mempool and confirms within ~1s — no generatetoaddress here.
         _append({
             "ts": time.time(),
             "src_ip": "127.0.0.1",

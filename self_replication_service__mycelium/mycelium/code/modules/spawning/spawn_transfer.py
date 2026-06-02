@@ -21,6 +21,8 @@ from .spawn_identity import ChildIdentity
 
 logger = setup_logger(__name__, log_file=Config.LOG_DIR / "orchestrator.log", level=Config.LOG_LEVEL)
 
+_DUST_THRESHOLD_SAT = 546   # below this, a P2WPKH output is non-standard
+
 
 async def transfer_inheritance(
     identity: ChildIdentity,
@@ -81,16 +83,33 @@ async def transfer_inheritance(
             "manual review required",
         )
     else:
-        # Re-read parent balance immediately before sizing: NodeMonitor's snapshot
-        # can be up to MONITOR_INTERVAL stale, and spawn_identity has already
-        # spent ~TOPUP_TARGET_DAYS of funding.
-        parent_balance_sat = await asyncio.to_thread(wallet.get_balance_satoshis)
-        child_share_sat = compute_child_share(parent_balance_sat)
+        # Size the inheritance from the eligibility-time snapshot, which is the
+        # pre-funding parent balance. compute_child_share subtracts the VPS cost
+        # exactly once; recomputing on the post-funding wallet balance would
+        # double-subtract that cost (and risk a stale-low read), yielding 0 sat.
+        child_share_sat = compute_child_share(node_state.btc_balance_sat)
         child_btc_address = identity.btc_address
+
+        # Resync UTXOs + confirmations before reading a live balance, then cap the
+        # share so the send can't exceed actual spendable funds.
+        await asyncio.to_thread(wallet.scan)
+        available_sat = await asyncio.to_thread(wallet.get_balance_satoshis)
+        spendable_sat = max(0, available_sat - Config.SPAWN_FEE_BUFFER_SAT)
+        child_share_sat = min(child_share_sat, spendable_sat)
         logger.info(
-            "Transferring inheritance: spawn_id=%s parent_balance=%d sat amount=%d sat to=%s",
-            identity.spawn_id, parent_balance_sat, child_share_sat, child_btc_address,
+            "Transferring inheritance: spawn_id=%s available=%d sat amount=%d sat to=%s",
+            identity.spawn_id, available_sat, child_share_sat, child_btc_address,
         )
+
+        if child_share_sat <= _DUST_THRESHOLD_SAT:
+            logger.warning(
+                "Inheritance for spawn_id=%s is %d sat (<= dust) — child already funded via VPS; "
+                "skipping BTC transfer and marking spawn complete.",
+                identity.spawn_id, child_share_sat,
+            )
+            ps.mark_spawn_completed(success=True, child_btc_address=identity.btc_address)
+            return ""   # sentinel: no on-chain inheritance tx
+
         ps.set("spawn_transfer_intent", {
             "spawn_id": identity.spawn_id,
             "child_btc_address": child_btc_address,

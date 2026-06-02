@@ -91,7 +91,6 @@ async def boot_child_orchestrator(
         "MYCELIUM_CAUTION_TRAIT_MIN": str(Config.CAUTION_TRAIT_MIN),
         "MYCELIUM_CAUTION_TRAIT_MAX": str(Config.CAUTION_TRAIT_MAX),
         "MYCELIUM_SPAWN_THRESHOLD_DAYS": str(Config.SPAWN_THRESHOLD_DAYS),
-        "MYCELIUM_SPAWN_RESERVE_DAYS": str(Config.SPAWN_RESERVE_DAYS),
         "MYCELIUM_INHERITANCE_RATIO": str(Config.INHERITANCE_RATIO),
     }
     if Config.LOG_ENDPOINT:

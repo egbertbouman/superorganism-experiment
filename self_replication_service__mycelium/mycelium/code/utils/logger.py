@@ -5,8 +5,11 @@ Logging configuration for the orchestrator system.
 
 import logging
 import sys
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Optional
+
+from config import Config
 
 
 def setup_logger(
@@ -27,6 +30,7 @@ def setup_logger(
     """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper()))
+    logger.propagate = False  # don't bubble to root handler installed by bitcoinlib/ipv8 basicConfig()
 
     if logger.handlers:
         return logger
@@ -42,7 +46,11 @@ def setup_logger(
 
     if log_file:
         log_file.parent.mkdir(parents=True, exist_ok=True)
-        file_handler = logging.FileHandler(log_file)
+        file_handler = RotatingFileHandler(
+            log_file,
+            maxBytes=Config.LOG_MAX_BYTES,
+            backupCount=1,
+        )
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)
 

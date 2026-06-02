@@ -75,8 +75,8 @@ class Config:
     CAUTION_MEAN_REVERSION: float = float(os.getenv("MYCELIUM_CAUTION_MEAN_REVERSION", "0.2"))
 
     # Spawn thresholds (injected by deployer; caution=0 baseline values)
+    # SPAWN_THRESHOLD_DAYS: minimum post-spawn total runway, in days, before caution scaling
     SPAWN_THRESHOLD_DAYS: int  = int(os.getenv("MYCELIUM_SPAWN_THRESHOLD_DAYS", "60"))
-    SPAWN_RESERVE_DAYS: int    = int(os.getenv("MYCELIUM_SPAWN_RESERVE_DAYS", "30"))
     INHERITANCE_RATIO: float   = float(os.getenv("MYCELIUM_INHERITANCE_RATIO", "0.4"))
     SPAWN_FEE_BUFFER_SAT: int  = int(os.getenv("MYCELIUM_SPAWN_FEE_BUFFER_SAT", "5000"))
     SPORESTACK_MIN_INVOICE_DOLLARS: int = int(os.getenv("MYCELIUM_SPORESTACK_MIN_INVOICE_DOLLARS", "5"))
@@ -105,6 +105,13 @@ class Config:
     # openssl is built without binary EC curves (no-ec2m).
     IPV8_CURVE: str = os.getenv("MYCELIUM_IPV8_CURVE", "medium")
     SIM_MODE: bool = os.getenv("MYCELIUM_SIM_MODE", "").strip().lower() in ("1", "true", "yes")
+
+    # Max bytes per orchestrator.log before RotatingFileHandler rolls it over.
+    # Total on-disk footprint per node ≤ 2 × LOG_MAX_BYTES (one active + one backup).
+    LOG_MAX_BYTES: int = int(os.getenv(
+        "MYCELIUM_LOG_MAX_BYTES",
+        str(128 * 1024 if SIM_MODE else 1024 * 1024),
+    ))
 
     # SporeStack / VPS provisioning defaults (injected by deployer; mirror mycelium-bootstrap/config.json)
     VPS_PROVIDER: str      = os.getenv("MYCELIUM_VPS_PROVIDER", "sporestack_eu")
