@@ -87,7 +87,6 @@ async def _handle_recovery() -> None:
 
 
 async def _tick() -> None:
-    """Single decision cycle."""
     ps = state_module.get()
     monitor = node_monitor.get_monitor()
     registry = peer_registry.get_registry()
@@ -108,7 +107,6 @@ async def _tick() -> None:
     caution_trait = ps.get_caution_trait()
     live_peers = registry.get_live_peers()
 
-    # Guard: pipeline already running
     if ps.is_spawn_in_progress():
         logger.warning("Spawn already in progress, skipping tick")
         return
@@ -124,9 +122,8 @@ async def _tick() -> None:
         "live_peer_count": len(live_peers),
     })
 
-    # PRIORITY 1 — failsafe. Fires only when total runway (bought VPS days +
-    # wallet/credit funds convertible to days) is exhausted, not when bought
-    # days alone run low. Matches spawn_thresholds.py:76.
+    # PRIORITY 1 — failsafe. Fires when total_runway_days is exhausted, not when
+    # bought days alone run low. Matches spawn_thresholds.py:76.
     effective_runway = (
         node_state.total_runway_days
         if node_state.total_runway_days is not None
@@ -156,7 +153,6 @@ async def _tick() -> None:
             })
         return
 
-    # PRIORITY 2 — top up SporeStack balance
     if node_state.days_remaining < Config.TOPUP_TRIGGER_DAYS:
         logger.info(
             "Runway %d days < topup threshold %d days — topping up SporeStack balance",
@@ -169,7 +165,7 @@ async def _tick() -> None:
                 "days_remaining": node_state.days_remaining,
             })
 
-            # Topup may have spent BTC; refresh so the spawn check below sees
+            # Topup may have spent BTC; refresh state before the spawn check.
             await asyncio.to_thread(monitor.refresh)
             node_state = monitor.get_state()
 
@@ -180,7 +176,6 @@ async def _tick() -> None:
             })
             return
 
-    # PRIORITY 3 — spawn
     eligibility = check_spawn_eligibility(node_state, caution_trait)
     if eligibility.eligible:
         spawn_id = f"spawn-{uuid4().hex[:8]}"
@@ -197,7 +192,6 @@ async def _tick() -> None:
         })
         return
 
-    # PRIORITY 4 — do nothing
     logger.info("No action: %s", eligibility.reason)
     event_logger.get().log_event("decision_complete", {
         "action": "none", "reason": eligibility.reason,
@@ -205,7 +199,6 @@ async def _tick() -> None:
 
 
 async def run(running_ref) -> None:
-    """Entry point called by the Orchestrator."""
     logger.info("Decision loop starting (interval=%ds)", Config.DECISION_INTERVAL)
     await _handle_recovery()
 

@@ -27,8 +27,6 @@ class NodePersistentState:
         )
         self._conn.commit()
 
-    # ── generic get / set / delete ──────────────────────────────
-
     def get(self, key: str, default: Any = None) -> Any:
         row = self._conn.execute(
             "SELECT value FROM state WHERE key = ?", (key,)
@@ -48,15 +46,11 @@ class NodePersistentState:
         self._conn.execute("DELETE FROM state WHERE key = ?", (key,))
         self._conn.commit()
 
-    # ── caution trait ───────────────────────────────────────────
-
     def get_caution_trait(self) -> float:
         return float(self.get("caution_trait", 0.5))
 
     def set_caution_trait(self, value: float) -> None:
         self.set("caution_trait", value)
-
-    # ── spawn guard ─────────────────────────────────────────────
 
     def is_spawn_in_progress(self) -> bool:
         return bool(self.get("spawn_in_progress", False))
@@ -93,9 +87,7 @@ class NodePersistentState:
             self._conn.rollback()
             raise
 
-    # Keys written by the spawn pipeline that must be cleared on completion so
-    # they don't leak into the next spawn. Kept in one list so adding a new
-    # intent key only requires updating this set and the writer.
+    # Kept in one list so adding a new intent key only requires updating this set and the writer.
     _SPAWN_KEYS_TO_CLEAR = (
         "spawn_id",
         "spawn_started_at",
@@ -162,8 +154,6 @@ class NodePersistentState:
                     spawn_dir, e,
                 )
 
-    # ── failsafe guard ──────────────────────────────────────────
-
     def is_failsafe_in_progress(self) -> bool:
         return bool(self.get("failsafe_in_progress", False))
 
@@ -173,8 +163,6 @@ class NodePersistentState:
     def mark_failsafe_completed(self) -> None:
         self.set("failsafe_in_progress", False)
 
-
-# ── module-level singleton ──────────────────────────────────────
 
 _instance: Optional[NodePersistentState] = None
 

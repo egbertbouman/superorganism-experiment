@@ -1,8 +1,3 @@
-"""
-Local spending Bitcoin wallet for autonomous node operations.
-
-"""
-
 import logging
 import os
 import resource
@@ -43,8 +38,8 @@ if Config.SIM_MODE:
         _aiorpcx = None
 
     if _aiorpcx is not None:
-        # ElectrumxClient.compose_request uses asyncio.get_event_loop() which fails
-        # under asyncio.to_thread workers — every scan surfaces as ServiceError.
+        # ElectrumxClient.compose_request calls asyncio.get_event_loop(), which raises
+        # inside asyncio.to_thread workers — wraps in a fresh event loop per call.
         from bitcoinlib.services.electrumx import ElectrumxClient as _ElectrumxClient
         from bitcoinlib.services.baseclient import ClientError as _ClientError
 
@@ -76,7 +71,7 @@ if Config.SIM_MODE:
 
         _ElectrumxClient.compose_request = _electrumx_compose_request_thread_safe
 
-    # _parse_transaction does tx['confirmations'] which KeyErrors on mempool txs.
+    # _parse_transaction accesses tx['confirmations'], which KeyErrors on mempool txs — default to 0.
     from bitcoinlib.services.electrumx import ElectrumxClient as _EC2  # noqa: E402
     _orig_parse_transaction = _EC2._parse_transaction
     def _parse_transaction_safe(self, tx, *args, **kwargs):
@@ -148,17 +143,11 @@ def _remove_from_etc_environment(key: str) -> None:
 
 
 class SpendingWallet:
-    """
-    Full spending Bitcoin wallet stored locally.
-    """
-
     def __init__(self, wallet: Wallet):
         self._wallet = wallet
 
     @_synchronized
     def get_receiving_address(self) -> str:
-        """Get a receiving address for this wallet.
-        """
         if Config.SIM_MODE:
             key = self._wallet.key_for_path([0, 0])  # deterministic m/84'/.../0/0, never rotates
         else:
@@ -167,22 +156,19 @@ class SpendingWallet:
 
     @_synchronized
     def get_balance_satoshis(self) -> int:
-        """Get confirmed balance in satoshis."""
         return self._wallet.balance()
 
     @_synchronized
     def get_balance_btc(self) -> float:
-        """Get confirmed balance in BTC."""
         return self.get_balance_satoshis() / 100_000_000
 
     @_synchronized
     def scan(self) -> None:
-        """Refresh wallet state (UTXOs + confirmations) and update balance."""
         self._resync_spendable_utxos()
         logger.info("Refresh complete. Balance: %s BTC", self.get_balance_btc())
 
     def _resync_spendable_utxos(self) -> None:
-        """Bounded wallet refresh used by heartbeat scan() and pre-send."""
+        """Refresh UTXOs and unconfirmed-tx confirmations; called by scan() and pre-send."""
         self._wallet.utxos_update(rescan_all=Config.SIM_MODE)
 
         DbTransaction = _bitcoinlib_db.DbTransaction
@@ -201,7 +187,6 @@ class SpendingWallet:
             self._wallet.transactions_update_by_txids(txids)
         self._wallet.transactions_update_confirmations()
 
-        # Memory guardrail
         peak_kb = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
         if peak_kb >= _SIM_SEND_RSS_WARN_KB:
             logger.warning(
@@ -217,7 +202,6 @@ class SpendingWallet:
 
     @_synchronized
     def send(self, address: str, amount_satoshis: int, fee=None) -> str:
-        """Send Bitcoin to address. Returns txid."""
         if Config.SIM_MODE:
             needed = amount_satoshis + _SIM_SEND_FEE_HEADROOM_SAT
             last_err: Optional[Exception] = None
@@ -294,7 +278,6 @@ class SpendingWallet:
 
     @_synchronized
     def sweep_all(self, address: str, fee_per_kb: int = None) -> str:
-        """Send entire balance to address, fee auto-calculated by bitcoinlib. Returns txid."""
         tx = self._wallet.sweep(address, broadcast=True, fee_per_kb=fee_per_kb)
         if not tx or not tx.txid:
             raise WalletError(f"Sweep failed: {getattr(tx, 'error', 'unknown error')}")
@@ -312,7 +295,6 @@ def scan_for_prior_send(
     address: str,
     amount_sat: int,
 ) -> Optional[str]:
-    """One pass over bitcoinlib's stored transactions; returns matching outbound txid or None."""
     try:
         wallet._wallet.transactions_update()
     except Exception as e:
@@ -343,7 +325,6 @@ def find_prior_send(
     address: str,
     amount_sat: int,
 ) -> Optional[str]:
-    """Poll bitcoinlib's indexer for up to _RECONCILE_POLL_TIMEOUT_SECONDS for a matching outbound tx."""
     start = time.time()
     while True:
         txid = scan_for_prior_send(wallet, address, amount_sat)
@@ -354,15 +335,10 @@ def find_prior_send(
         time.sleep(_RECONCILE_POLL_INTERVAL_SECONDS)
 
 
-# Module-level singleton
 _wallet_instance: Optional[SpendingWallet] = None
 
 
 def initialize_wallet() -> None:
-    """
-    Initialize the spending wallet singleton.
-    Later boots: loads wallet DB from disk directly.
-    """
     global _wallet_instance
 
     name = Config.BITCOIN_WALLET_NAME

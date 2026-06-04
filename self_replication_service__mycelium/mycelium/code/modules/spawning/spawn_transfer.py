@@ -1,11 +1,4 @@
-"""Sends inheritance BTC to the child and marks spawn complete in persistent state.
-
-Bracket the broadcast with a write-ahead `spawn_transfer_intent` record and a
-`spawn_transfer_txid` result. On resume, if intent exists but no txid, inspect
-bitcoinlib's local transaction history for a matching outbound tx before
-re-broadcasting — bitcoinlib has no in-flight dedup, so a re-broadcast can pay
-the inheritance twice from different UTXOs.
-"""
+"""Sends inheritance BTC to the child and marks spawn complete in persistent state."""
 
 import asyncio
 
@@ -22,6 +15,13 @@ from .spawn_identity import ChildIdentity
 logger = setup_logger(__name__, log_file=Config.LOG_DIR / "orchestrator.log", level=Config.LOG_LEVEL)
 
 _DUST_THRESHOLD_SAT = 546   # below this, a P2WPKH output is non-standard
+
+# electrs/electrumx can transiently drop a request under regtest (e.g. while
+# reindexing a freshly mined block). A single failure in the pre-transfer scan
+# must not abort the pipeline after the child VPS is already provisioned, so
+# retry the resync — mirroring wallet.send()'s pre-send loop.
+_SCAN_RETRY_ATTEMPTS = 5
+_SCAN_RETRY_DELAY = 2.0
 
 
 async def transfer_inheritance(
@@ -92,7 +92,22 @@ async def transfer_inheritance(
 
         # Resync UTXOs + confirmations before reading a live balance, then cap the
         # share so the send can't exceed actual spendable funds.
-        await asyncio.to_thread(wallet.scan)
+        for attempt in range(_SCAN_RETRY_ATTEMPTS):
+            try:
+                await asyncio.to_thread(wallet.scan)
+                break
+            except Exception as e:
+                if attempt == _SCAN_RETRY_ATTEMPTS - 1:
+                    raise SpawnError(
+                        "transfer",
+                        f"Pre-transfer wallet scan failed for {identity.spawn_id} "
+                        f"after {_SCAN_RETRY_ATTEMPTS} attempts: {e}",
+                    ) from e
+                logger.warning(
+                    "Pre-transfer wallet scan failed (attempt %d/%d): %s — retrying in %.1fs",
+                    attempt + 1, _SCAN_RETRY_ATTEMPTS, e, _SCAN_RETRY_DELAY,
+                )
+                await asyncio.sleep(_SCAN_RETRY_DELAY)
         available_sat = await asyncio.to_thread(wallet.get_balance_satoshis)
         spendable_sat = max(0, available_sat - Config.SPAWN_FEE_BUFFER_SAT)
         child_share_sat = min(child_share_sat, spendable_sat)

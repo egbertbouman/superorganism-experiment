@@ -30,7 +30,6 @@ class ContentDownloader:
         self.disk_threshold = disk_threshold
         self.cookies_file = cookies_file
 
-        # Verify yt-dlp is available
         try:
             subprocess.run(
                 ["yt-dlp", "--version"],
@@ -42,12 +41,10 @@ class ContentDownloader:
             raise ContentDownloaderError(f"yt-dlp check failed: {e}")
 
     def _get_disk_usage_percent(self) -> float:
-        """Return disk usage percentage for content_dir's filesystem."""
         usage = shutil.disk_usage(self.content_dir)
         return (usage.used / usage.total) * 100
 
     def _get_already_downloaded_ids(self) -> set[str]:
-        """Scan content_dir for already-downloaded video IDs (11-char prefix of filenames)."""
         downloaded = set()
         for f in self.content_dir.iterdir():
             if f.is_file() and not f.name.endswith(".info.json"):
@@ -59,7 +56,6 @@ class ContentDownloader:
         return downloaded
 
     def _download_video(self, video_id: str) -> bool:
-        """Download a single video's audio via yt-dlp. Returns True on success."""
         url = f"https://www.youtube.com/watch?v={video_id}"
         output_template = str(self.content_dir / "%(id)s_%(title)s.%(ext)s")
 
@@ -106,8 +102,6 @@ class ContentDownloader:
             return False
 
     def download_until_threshold(self) -> int:
-        """Download vids until disk usage at a threshold. Returns count of downloads."""
-        # shuffle video IDs
         try:
             text = self.video_ids_file.read_text()
         except FileNotFoundError:
@@ -123,14 +117,12 @@ class ContentDownloader:
 
         random.shuffle(all_ids)
 
-        # Skip already-downloaded
         already_downloaded = self._get_already_downloaded_ids()
         if already_downloaded:
             logger.info("Found %d already-downloaded videos, skipping them", len(already_downloaded))
         pending = [vid for vid in all_ids if vid not in already_downloaded]
         logger.info("%d videos remaining to download", len(pending))
 
-        # Check if already at threshold
         current_usage = self._get_disk_usage_percent()
         if current_usage >= self.disk_threshold:
             logger.info("Disk already at %.1f%% (threshold: %d%%), skipping downloads", current_usage, self.disk_threshold)
@@ -140,7 +132,6 @@ class ContentDownloader:
         consecutive_failures = 0
 
         for video_id in pending:
-            # Check disk threshold before each download
             current_usage = self._get_disk_usage_percent()
             if current_usage >= self.disk_threshold:
                 logger.info("Disk at %.1f%%, reached threshold of %d%%", current_usage, self.disk_threshold)

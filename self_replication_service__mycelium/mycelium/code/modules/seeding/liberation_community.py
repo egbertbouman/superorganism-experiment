@@ -21,7 +21,6 @@ from config import Config
 
 @dataclass
 class LiberatedContentPayload(DataClassPayload[1]):
-    """Payload for announcing liberated content."""
     url: str
     license: str
     magnet_link: str
@@ -30,7 +29,6 @@ class LiberatedContentPayload(DataClassPayload[1]):
 
 @dataclass
 class SeedboxInfoPayload(DataClassPayload[2]):
-    """Payload for broadcasting seedbox fleet info."""
     friendly_name: str
     public_ip: str
     git_commit_hash: str
@@ -44,12 +42,7 @@ class SeedboxInfoPayload(DataClassPayload[2]):
 
 
 class LiberationCommunity(Community):
-    """
-    IPV8 community for announcing and discovering liberated content.
-
-    Seedboxes broadcast their torrents to this community.
-    Health checkers listen and monitor the announced torrents.
-    """
+    """Seedboxes broadcast to this community; health checkers listen to discover torrents."""
 
     # Same community ID as SwarmHealth-Checker to enable discovery
     community_id = sha1(b"liberation_community").digest()
@@ -60,16 +53,10 @@ class LiberationCommunity(Community):
         # Gossip dedup: btc_address -> unix timestamp of last forward
         self._last_forwarded_whoami: Dict[str, float] = {}
 
-        # Callback for received content (optional)
         self.on_content_received_callback: Optional[Callable[[Peer, LiberatedContentPayload], None]] = None
-
-        # Callback fired when a new peer connects
         self._on_new_peer_callback: Optional[Callable] = None
-
-        # Callback for received seedbox info (optional)
         self.on_seedbox_info_callback: Optional[Callable[[Peer, SeedboxInfoPayload], None]] = None
 
-        # Register message handlers
         self.add_message_handler(LiberatedContentPayload, self.on_liberated_content)
         self.add_message_handler(SeedboxInfoPayload, self.on_seedbox_info)
 
@@ -80,15 +67,6 @@ class LiberationCommunity(Community):
         self.logger.info("LiberationCommunity started")
 
     def broadcast_content(self, payload: LiberatedContentPayload) -> int:
-        """
-        Broadcast content to all connected peers.
-
-        Args:
-            payload: The content payload to broadcast
-
-        Returns:
-            Number of peers the content was sent to
-        """
         peers = self.get_peers()
         if not peers:
             return 0
@@ -112,7 +90,6 @@ class LiberationCommunity(Community):
 
     @lazy_wrapper(LiberatedContentPayload)
     def on_liberated_content(self, peer: Peer, payload: LiberatedContentPayload) -> None:
-        """Handle received liberated content."""
         self.logger.info("Received content from peer %s: %s",
                         peer.mid.hex()[:16], payload.url[:60] if payload.url else "unknown")
 
@@ -126,16 +103,9 @@ class LiberationCommunity(Community):
         self,
         callback: Callable[[Peer, LiberatedContentPayload], None]
     ) -> None:
-        """Set callback for when content is received from peers."""
         self.on_content_received_callback = callback
 
     def broadcast_seedbox_info(self, payload: SeedboxInfoPayload) -> int:
-        """
-        Broadcast seedbox info to all connected peers (no dedup, latest wins).
-
-        Returns:
-            Number of peers the info was sent to
-        """
         peers = self.get_peers()
 
         if not peers:
@@ -158,8 +128,6 @@ class LiberationCommunity(Community):
 
     @lazy_wrapper(SeedboxInfoPayload)
     def on_seedbox_info(self, peer: Peer, payload: SeedboxInfoPayload) -> None:
-        """Handle received seedbox info."""
-
         if self.on_seedbox_info_callback:
             try:
                 self.on_seedbox_info_callback(peer, payload)
@@ -181,5 +149,4 @@ class LiberationCommunity(Community):
         self,
         callback: Callable[[Peer, SeedboxInfoPayload], None]
     ) -> None:
-        """Set callback for when seedbox info is received from peers."""
         self.on_seedbox_info_callback = callback

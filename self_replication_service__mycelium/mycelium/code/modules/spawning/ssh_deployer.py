@@ -16,23 +16,18 @@ logger = setup_logger(__name__, log_file=Config.LOG_DIR / "orchestrator.log", le
 
 
 class DeployerError(Exception):
-    """Base exception for deployment operations."""
     pass
 
 
 class SSHConnectionError(DeployerError):
-    """Raised when SSH connection fails."""
     pass
 
 
 class CommandError(DeployerError):
-    """Raised when remote command fails."""
     pass
 
 
 class SSHDeployer:
-    """SSH-based deployer for remote server setup and mycelium deployment."""
-
     MYCELIUM_REPO_URL = "https://github.com/Tribler/superorganism-experiment.git"
     MYCELIUM_SUBPATH = "self_replication_service__mycelium/mycelium"
     REMOTE_BASE_DIR = "/root/mycelium"
@@ -74,7 +69,6 @@ class SSHDeployer:
             raise CommandError(f"Failed to write secret file: {stderr.read().decode()}")
 
     def _load_private_key(self) -> paramiko.PKey:
-        """Load SSH private key, auto-detecting the key type."""
         key_path = str(self.ssh_key_path)
 
         key_classes = [
@@ -110,7 +104,6 @@ class SSHDeployer:
         retry_count: int = 3,
         retry_delay: int = 10
     ) -> None:
-        """Establish SSH connection to remote server."""
         self.host = host
         self.port = port
         self.user = user
@@ -171,7 +164,6 @@ class SSHDeployer:
         check: bool = True,
         background: bool = False
     ) -> Tuple[str, str, int]:
-        """Execute command on remote server. Returns (stdout, stderr, exit_code)."""
         if not self.client:
             raise DeployerError("Not connected. Call connect() first.")
 
@@ -205,7 +197,6 @@ class SSHDeployer:
             scp.put(local_path, remote_path)
 
     def upload_directory(self, local_path: str, remote_path: str) -> None:
-        """Upload a directory using rsync over SSH."""
         logger.info("Uploading directory %s -> %s", local_path, remote_path)
 
         self.run_command(f"mkdir -p {remote_path}")
@@ -357,7 +348,6 @@ class SSHDeployer:
         logger.info("Mycelium deployed successfully")
 
     def deploy_video_ids(self, local_path: str) -> None:
-        """Upload video IDs file to remote server."""
         if not Path(local_path).exists():
             raise DeployerError(f"Video IDs file not found: {local_path}")
 
@@ -366,7 +356,6 @@ class SSHDeployer:
         logger.info("Video IDs file deployed successfully")
 
     def deploy_cookies(self, local_path: str) -> None:
-        """Upload YouTube cookies file to remote server."""
         if not Path(local_path).exists():
             raise DeployerError(f"Cookies file not found: {local_path}")
 
@@ -432,7 +421,6 @@ class SSHDeployer:
         logger.info("Orchestrator started successfully")
 
     def check_health(self) -> bool:
-        """Return True if orchestrator is running."""
         stdout, _, exit_code = self.run_command(
             "pgrep -f 'python.*main.py'",
             check=False
@@ -453,7 +441,6 @@ def generate_ssh_keypair(
     key_type: str = "ed25519",
     comment: str = "mycelium-deploy"
 ) -> Tuple[str, str]:
-    """Generate SSH keypair. Returns (private_key_path, public_key_content)."""
     key_path = Path(key_path)
     key_path.parent.mkdir(parents=True, exist_ok=True)
 

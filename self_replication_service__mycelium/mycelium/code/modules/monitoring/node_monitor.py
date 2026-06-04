@@ -49,7 +49,6 @@ class NodeMonitor:
     def refresh(self) -> None:
         """Refresh node state from blockchain and SporeStack API. Swallows all exceptions."""
         try:
-            # BTC balance
             w = get_wallet()
             if w:
                 try:
@@ -60,7 +59,6 @@ class NodeMonitor:
             else:
                 btc_balance_sat = 0
 
-            # SporeStack balance
             sporestack_balance_cents = 0
             burn_rate_cents_per_day = 0
             cost_per_day_usd = 0.0
@@ -79,11 +77,9 @@ class NodeMonitor:
                     sporestack_balance_cents = int(data.get("balance_cents", 0))
                     burn_rate_cents_per_day = int(data.get("burn_rate_cents", 0))
                     cost_per_day_usd = round(burn_rate_cents_per_day / 100, 4)
-                    # Do NOT use data.get("days_remaining") — SporeStack computes that as
-                    # balance/burn_rate which is always 0 for per-cycle-billed servers.
-                    # burn_rate_cents_per_day is always 0 for monthy-billed servers.
-                    # ONLY way to infer/get that information is to wait for /server/quote to support
-                    # the VPS provider used here and then to divide the quote's cost by 30.
+                    # Do NOT use data.get("days_remaining") — SporeStack computes it as
+                    # balance/burn_rate, which is always 0 for per-cycle-billed servers.
+                    # Real days must be inferred from the server expiration timestamp instead.
 
                 try:
                     servers = sporestack_client.get_servers(token)
@@ -103,10 +99,8 @@ class NodeMonitor:
                     if server_expiry_ts:
                         days_remaining = max(0, int((server_expiry_ts - time.time()) / 86400))
 
-            # Possible total runway = bought server-days + spendable funds / cost_per_day.
-            # Decouples the spawn guard from the always-tight bought-runway: the genesis
-            # can spawn whenever it has the FUNDS for it, not only when it has pre-paid
-            # for that fuel as VPS time.
+            # total_runway_days = bought server-days + spendable funds converted to days.
+            # Lets spawn fire when funds are sufficient, not only when VPS time is pre-paid.
             total_runway_days: Optional[int] = days_remaining
             if days_remaining is not None and Config.VPS_MONTHLY_COST_CENTS > 0:
                 cost_per_day_cents = Config.VPS_MONTHLY_COST_CENTS / 30
@@ -137,7 +131,6 @@ class NodeMonitor:
         return self._state
 
 
-# Module-level singleton
 _monitor: Optional[NodeMonitor] = None
 
 

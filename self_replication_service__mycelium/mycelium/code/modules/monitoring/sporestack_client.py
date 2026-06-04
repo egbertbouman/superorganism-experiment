@@ -1,7 +1,3 @@
-"""
-SporeStack API client
-"""
-
 import json
 import time
 import urllib.request
@@ -18,9 +14,6 @@ class SporeStackError(Exception):
 
 
 def get_info(token: str) -> Optional[dict]:
-    """
-    Get token info from SporeStack API.
-    """
     try:
         url = f"{Config.SPORESTACK_BASE_URL}/token/{token}/info"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})
@@ -209,7 +202,6 @@ def launch_server(
 
 
 def _get_server(token: str, machine_id: str) -> Optional[dict]:
-    """GET /token/{token}/servers/{machine_id} → server dict, or None on error."""
     try:
         url = f"{Config.SPORESTACK_BASE_URL}/token/{token}/servers/{machine_id}"
         req = urllib.request.Request(url, headers={"Accept": "application/json"})

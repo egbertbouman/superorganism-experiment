@@ -22,9 +22,9 @@ class SpawnEligibility:
     eligible: bool
     reason: str
     effective_threshold: int    # days
-    post_spawn_runway_days: int # total runway remaining after the spawn outlay
+    post_spawn_runway_days: int
     post_spawn_btc_sat: int     # BTC left in wallet after the spawn outlay (for logging)
-    child_share_sat: int        # BTC that would go to child
+    child_share_sat: int
 
 
 def _vps_cost_sat() -> int:
@@ -103,10 +103,7 @@ def check_spawn_eligibility(node_state: NodeState, caution_trait: float) -> Spaw
 
 
 def mutate_caution_trait(parent_trait: float) -> float:
-    """
-    Produce a slightly mutated child caution trait via Gaussian drift.
-    Called by parent at spawn time; result injected as MYCELIUM_CAUTION_TRAIT for child.
-    """
+    """Produce a slightly mutated child caution trait via Gaussian drift."""
     drift = Config.CAUTION_MEAN_REVERSION * (Config.CAUTION_TRAIT_TARGET - parent_trait)
     child = parent_trait + drift + random.gauss(0, Config.CAUTION_MUTATION_SIGMA)
     result = max(Config.CAUTION_TRAIT_MIN, min(Config.CAUTION_TRAIT_MAX, child))

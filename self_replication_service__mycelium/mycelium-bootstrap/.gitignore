@@ -332,7 +332,11 @@ code/utils/logger
 logs/
 data/
 CreativeCommonsMusic/*
+sim/analysis/lineage_frames/*
 *.torrent
+*.pdf
+*.png
+
 
 .ENV
 

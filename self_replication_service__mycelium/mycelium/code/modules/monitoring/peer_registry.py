@@ -58,7 +58,6 @@ class PeerRegistry:
         )
 
     def get_live_peers(self) -> List[PeerInfo]:
-        """Return peers heard from within the TTL window."""
         cutoff = time.time() - self._ttl
         return [p for p in self._fleet.values() if p.last_seen >= cutoff]
 
@@ -66,7 +65,6 @@ class PeerRegistry:
         return len(self.get_live_peers())
 
     def get_all_peers(self) -> List[PeerInfo]:
-        """All peers including stale (for debugging/heartbeat logging)."""
         return list(self._fleet.values())
 
 

@@ -368,9 +368,8 @@ def _build_sim_env_lines(env: dict, secrets_in: dict, container_ipv4: str) -> st
     # Alpine's openssl is built without binary EC curves (no-ec2m), so IPv8's
     # default 'medium' (sect409k1) fails. curve25519 uses libnacl, sidestepping openssl.
     enriched["MYCELIUM_IPV8_CURVE"] = "curve25519"
-    # Match mock's BTC_USD constant so total_runway_days computation in-container
-    # uses the exact same rate the mock uses to price invoices.
     enriched["MYCELIUM_BTC_USD_RATE"] = str(BTC_USD)
+    enriched["MYCELIUM_VPS_MONTHLY_COST_CENTS"] = str(MONTHLY_COST_CENTS)
     enriched["MYCELIUM_PUBLIC_IP"] = container_ipv4 or enriched.get("MYCELIUM_PUBLIC_IP", "")
     if bootstrap_ip:
         enriched["MYCELIUM_IPV8_BOOTSTRAP"] = f"{bootstrap_ip}:{IPV8_BOOTSTRAP_PORT}"

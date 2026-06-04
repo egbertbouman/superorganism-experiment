@@ -29,7 +29,7 @@ class ChildVpsInfo:
     ipv4: str           # raw field kept for diagnostics
     ipv6: str           # raw field kept for diagnostics
     ssh_port: int
-    ssh_key_path: str   # carried through from identity for deploy convenience
+    ssh_key_path: str
 
 
 def _pick_host(server: dict) -> tuple[str, str, Optional[str]]:

@@ -1,32 +1,31 @@
 [btc]
-block_interval_s = 300         # idle heartbeat: seconds between blocks when the mempool is empty (0 = none); mempool txs are still mined within ~1s
+block_interval_s = 300         # idle mining -> seconds between blocks when the mempool is empty; mempool txs are still mined on request
 
 [sporestack]
-time_scale         = 4000     # speed-up factor
+time_scale         = 4000     # sim speed-up ratio
 btc_usd            = 50000    # BTC/USD rate
-monthly_cost_cents = 9800     # cents per server per 30 sim-days -> 97 eur per month for 400gb storage per node
-invoice_lifetime_s = 600      # seconds an unpaid invoice stays open
+monthly_cost_cents = 9800     # cents per server per 30 sim-days -> 98 eur per month for 400gb storage per node -> real SporeStack prices
+invoice_lifetime_s = 600      # ttl of invoice
 
 [genesis]
-days                   = 90     # SporeStack runway purchased for genesis
-initial_btc            = 0.2   # regtest BTC fauceted into genesis wallet -> 1k eur ~ 0.02
-faucet_enabled          = false   # false = fleet lives on initial_btc lump sum only
-faucet_max_multiplier   = 3     # daily_max = active_nodes * monthly_cost_btc * this / days_per_month
-faucet_min_floor        = 0.8   # minimum = percentage of max
-faucet_days_per_month   = 30    # divisor for the daily drip
-faucet_pause_threshold  = 50    # pause drip when active_nodes >= this
-faucet_resume_threshold = 20    # resume drip when active_nodes <= this
-caution_trait          = 0.5
-caution_mutation_sigma = 0.05
-caution_trait_target   = 0.5    # center the mutation drifts toward
-caution_mean_reversion = 0.2    # restoring strength theta; 0 = old symmetric behavior
-caution_trait_min      = 0.35   # safety-net floor
-caution_trait_max      = 0.9
-spawn_threshold_days   = 60     # minimum post-spawn total runway (days) before caution scaling
-inheritance_ratio      = 0.3
+faucet_enabled          = true   # false = fleet lives on initial_btc lump sum only
+days                    = 90     # SporeStack runway purchased for genesis
+initial_btc             = 0.02   # regtest BTC fauceted into genesis wallet -> 1k eur ~ 0.02
+faucet_max_multiplier   = 10     # daily_max = active_nodes * monthly_cost_btc * this / days_per_month
+faucet_min_floor        = 0.8    # minimum = percentage of max
+faucet_days_per_month   = 30     # divisor for the daily drip
+faucet_pause_threshold  = 60     # pause drip when active_nodes >= this
+faucet_resume_threshold = 40     # resume drip when active_nodes <= this
+caution_trait           = 0.5
+caution_mutation_sigma  = 0.05   # how much caution trait drift per child
+caution_trait_target    = 0.5    # center the mutation drifts toward
+caution_mean_reversion  = 0.2    # restoring towards mean strength; 0 = symmetric
+caution_trait_min       = 0.35   # floor
+caution_trait_max       = 0.9    # ceiling
+spawn_threshold_days    = 60     # minimum post-spawn total runway before caution scaling (can only go up from here)
+inheritance_ratio       = 0.4    # % of post-spawn remaining BTC reserves to be split with child
 
 [intervals]
-# Mycelium actual intervals in seconds
 decision_interval         = 30
 heartbeat_interval        = 10
 peer_registry_ttl         = 120

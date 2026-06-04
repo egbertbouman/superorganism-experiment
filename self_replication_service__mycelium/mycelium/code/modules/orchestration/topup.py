@@ -18,21 +18,16 @@ _SS_MIN_INVOICE_DOLLARS = 5
 
 
 async def topup_sporestack(node_state: NodeState) -> None:
-    """Buy exactly TOPUP_TARGET_DAYS (30) of SporeStack run time from the BTC wallet."""
-
-    # Read SporeStack token
     try:
         token = Config.SPORESTACK_TOKEN_FILE.read_text().strip()
     except OSError as e:
         logger.error("Cannot read SporeStack token: %s", e)
         return
 
-    # Calculate monthly VPS cost (always populated: /server/quote with Config fallback)
     monthly_cost_cents = sporestack_client.calculate_monthly_vps_cost(
         Config.VPS_FLAVOR, node_state.vps_provider or Config.VPS_PROVIDER
     )
 
-    # Scale to TOPUP_TARGET_DAYS (≈30 days = one month)
     cost_cents = int(monthly_cost_cents * Config.TOPUP_TARGET_DAYS / 30)
     current_cents = node_state.sporestack_balance_cents or 0
     needed_cents = cost_cents - current_cents
@@ -50,7 +45,6 @@ async def topup_sporestack(node_state: NodeState) -> None:
         needed_cents / 100, Config.TOPUP_TARGET_DAYS, current_cents / 100, needed_dollars,
     )
 
-    # Create invoice
     response = await asyncio.to_thread(sporestack_client.create_invoice, token, needed_dollars)
     if not response:
         logger.error("Failed to create SporeStack invoice")
@@ -66,7 +60,6 @@ async def topup_sporestack(node_state: NodeState) -> None:
     address, amount_sat = parsed
     logger.info("Invoice: send %d sat to %s (for $%d)", amount_sat, address, needed_dollars)
 
-    # Check BTC balance
     wallet = get_wallet()
     if wallet is None:
         logger.error("Wallet not initialized")
@@ -78,7 +71,6 @@ async def topup_sporestack(node_state: NodeState) -> None:
         )
         return
 
-    # Send payment
     try:
         txid = await asyncio.to_thread(wallet.send, address, amount_sat)
         logger.info("Sent %d sat to %s — txid %s", amount_sat, address, txid)

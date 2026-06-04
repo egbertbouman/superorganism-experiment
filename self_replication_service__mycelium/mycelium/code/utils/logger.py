@@ -1,8 +1,3 @@
-"""
-Logging configuration for the orchestrator system.
-
-"""
-
 import logging
 import sys
 from logging.handlers import RotatingFileHandler
@@ -17,17 +12,6 @@ def setup_logger(
     log_file: Optional[Path] = None,
     level: str = "INFO"
 ) -> logging.Logger:
-    """
-    Configure and return a logger instance.
-
-    Args:
-        name: Logger name
-        log_file: Optional path to log file
-        level: Logging level (DEBUG, INFO, WARNING, ERROR, CRITICAL)
-
-    Returns:
-        Configured logger instance
-    """
     logger = logging.getLogger(name)
     logger.setLevel(getattr(logging, level.upper()))
     logger.propagate = False  # don't bubble to root handler installed by bitcoinlib/ipv8 basicConfig()

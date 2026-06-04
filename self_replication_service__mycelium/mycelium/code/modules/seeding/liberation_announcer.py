@@ -1,9 +1,4 @@
-"""
-Liberation Announcer - broadcasts seeded content to IPV8 network.
-
-This module connects the seedbox to the IPV8 network, announcing
-all seeded torrents so health checkers can discover and monitor them.
-"""
+"""Liberation Announcer — connects Seedbox to the IPV8 LiberationCommunity."""
 
 import asyncio
 import shutil
@@ -70,22 +65,16 @@ def _resolve_bootstrap_defs():
 
 
 class LiberationAnnouncer:
-    """
-    Announces seeded content to the IPV8 network.
-    """
-
     def __init__(self, seedbox: Optional[Seedbox], key_file: Optional[str] = None):
         self.seedbox = seedbox
         self.key_file = key_file or str(Config.DATA_DIR / "liberation_key.pem")
         self.ipv8: Optional[IPv8] = None
         self.community: Optional[LiberationCommunity] = None
 
-        # Seedbox info
         self._start_time: float = time.time()
         self._cached_public_ip: Optional[str] = None
 
     async def start(self) -> None:
-        """Start the IPV8 service and liberation community."""
         logger.info("Starting Liberation Announcer...")
 
         builder = ConfigBuilder().clear_keys().clear_overlays()
@@ -118,7 +107,6 @@ class LiberationAnnouncer:
         await self.ipv8.start()
         logger.info("IPv8 started")
 
-        # Find the liberation community
         for overlay in self.ipv8.overlays:
             if isinstance(overlay, LiberationCommunity):
                 self.community = overlay
@@ -143,12 +131,6 @@ class LiberationAnnouncer:
         logger.info("My peer ID: %s...", self.community.my_peer.mid.hex()[:16])
 
     async def announce_content(self) -> int:
-        """
-        Announce all seeded content to the network.
-
-        Returns:
-            Number of peers reached across all content items
-        """
         if not self.community:
             logger.warning("Cannot announce: community not initialized")
             return 0
@@ -168,17 +150,10 @@ class LiberationAnnouncer:
         return total_sent
 
     async def announce_loop(self, interval: int = Config.CONTENT_BROADCAST_INTERVAL) -> None:
-        """
-        Periodically broadcast the full content list to all peers.
-
-        Args:
-            interval: Seconds between full-broadcast cycles
-        """
         logger.info("Starting announcement loop (interval: %ds)", interval)
 
         while True:
             try:
-                # Wait for peers to connect
                 await asyncio.sleep(5)
 
                 peer_count = len(self.community.get_peers()) if self.community else 0
@@ -198,7 +173,6 @@ class LiberationAnnouncer:
                 await asyncio.sleep(interval)
 
     async def _send_all_content_to_peer(self, peer) -> None:
-        """Send full content list to a newly connected peer."""
         if not self.community:
             return
         content_list = self.seedbox.get_content_for_broadcast()
@@ -216,7 +190,6 @@ class LiberationAnnouncer:
         logger.info("Initial burst: %d items → new peer %s", len(content_list), peer.mid.hex()[:16])
 
     def _get_git_commit_hash(self) -> str:
-        """Get short git commit hash of the running code."""
         try:
             result = subprocess.run(
                 ["git", "rev-parse", "--short", "HEAD"],
@@ -246,12 +219,10 @@ class LiberationAnnouncer:
         return ""
 
     def _get_disk_usage(self) -> tuple[int, int]:
-        """Get disk total and used bytes for /."""
         usage = shutil.disk_usage("/")
         return usage.total, usage.used
 
     async def _create_seedbox_info_payload(self) -> SeedboxInfoPayload:
-        """Assemble a SeedboxInfoPayload with current node info."""
         uptime = int(time.time() - self._start_time)
         disk_total, disk_used = self._get_disk_usage()
         public_ip = await self._get_public_ip()
@@ -274,7 +245,6 @@ class LiberationAnnouncer:
         )
 
     async def announce_seedbox_info(self) -> int:
-        """Broadcast seedbox info to all peers."""
         if not self.community:
             logger.warning("Cannot announce seedbox info: community not initialized")
             return 0
@@ -283,7 +253,6 @@ class LiberationAnnouncer:
         return self.community.broadcast_seedbox_info(payload)
 
     async def seedbox_info_loop(self, interval: int = 60) -> None:
-        """Periodically broadcast seedbox info."""
         logger.info("Starting seedbox info loop (interval: %ds)", interval)
 
         while True:
@@ -302,7 +271,6 @@ class LiberationAnnouncer:
                 await asyncio.sleep(interval)
 
     def _extract_infohash(self, magnet_link: str) -> Optional[str]:
-        """Extract infohash from magnet link."""
         try:
             parts = magnet_link.split("btih:")
             if len(parts) > 1:
@@ -312,13 +280,11 @@ class LiberationAnnouncer:
         return None
 
     async def stop(self) -> None:
-        """Stop the IPV8 service."""
         if self.ipv8:
             await self.ipv8.stop()
             logger.info("Liberation Announcer stopped")
 
     def get_stats(self) -> dict:
-        """Get announcer statistics."""
         return {
             "connected_peers": len(self.community.get_peers()) if self.community else 0,
             "community_active": self.community is not None

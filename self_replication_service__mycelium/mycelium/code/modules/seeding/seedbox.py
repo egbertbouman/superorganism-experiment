@@ -1,8 +1,3 @@
-"""
-BitTorrent seeding operations.
-
-"""
-
 import glob
 import json
 import os
@@ -23,7 +18,6 @@ from utils import setup_logger
 
 @dataclass
 class ContentInfo:
-    """Metadata for a seeded content file."""
     file_path: Path
     magnet_link: str
     url: Optional[str] = None
@@ -41,8 +35,6 @@ class SeedboxError(Exception):
 
 
 class Seedbox:
-    """BitTorrent seeding operations for content distribution."""
-
     def __init__(
         self,
         content_dir: Path,
@@ -61,15 +53,6 @@ class Seedbox:
         self._stop_event = threading.Event()
 
     def _create_torrent(self, file_path: Path) -> Path:
-        """
-        Create torrent file from filepath
-
-        Args:
-            file_path: Path to-be-torrent file
-
-        Returns:
-            Path to .torrent file
-        """
         torrent_file = Path(str(file_path) + ".torrent")
 
         if torrent_file.exists():
@@ -105,12 +88,7 @@ class Seedbox:
         logger.info("Session initialized on ports %d-%d", self.port_min, self.port_max)
 
     def _load_content_files(self) -> List[Path]:
-        """
-        Load content files from directory (excluding metadata files).
-
-        Returns:
-            List of file paths to seed
-        """
+        """Return seedable content files (excludes .torrent and .info.json metadata files)."""
         if not self.content_dir.exists():
             raise SeedboxError(f"Content directory not found: {self.content_dir}")
 
@@ -128,15 +106,7 @@ class Seedbox:
         return files
 
     def _load_metadata(self, file_path: Path) -> Tuple[Optional[str], Optional[str]]:
-        """
-        Load metadata from .info.json file created by yt-dlp.
-
-        Args:
-            file_path: Path to the content file
-
-        Returns:
-            Tuple of (url, license) or (None, None) if not found
-        """
+        """Load metadata from .info.json file created by yt-dlp. Returns (url, license) or (None, None)."""
         # Try different possible metadata file locations
         # yt-dlp creates: video_title.info.json for video_title.flac
         base_name = file_path.stem  # filename without extension
@@ -165,25 +135,10 @@ class Seedbox:
             return None, None
 
     def _get_magnet_link(self, torrent_file: Path) -> str:
-        """
-        Generate magnet link from torrent file.
-
-        Args:
-            torrent_file: Path to .torrent file
-
-        Returns:
-            Magnet URI string
-        """
         info = lt.torrent_info(str(torrent_file))
         return lt.make_magnet_uri(info)
 
     def _add_torrents(self, files: List[Path]) -> None:
-        """
-        Create and add torrents to session, populating content registry.
-
-        Args:
-            files: List of files to create torrents for
-        """
         for file_path in files:
             try:
                 torrent_file = self._create_torrent(file_path)
@@ -194,7 +149,6 @@ class Seedbox:
                 })
                 self.handles.append((handle, file_path.name))
 
-                # Generate magnet link and load metadata
                 magnet_link = self._get_magnet_link(torrent_file)
                 url, license_info = self._load_metadata(file_path)
                 infohash = str(info.info_hash())
@@ -211,33 +165,12 @@ class Seedbox:
                 logger.error("Failed to add %s: %s", file_path.name, e)
 
     def get_content_for_broadcast(self) -> List[ContentInfo]:
-        """
-        Get all content info for IPV8 broadcast.
-
-        Returns:
-            List of ContentInfo objects with magnet links and metadata
-        """
         return list(self.content_registry.values())
 
     def get_content_by_infohash(self, infohash: str) -> Optional[ContentInfo]:
-        """
-        Get content info by infohash.
-
-        Args:
-            infohash: The torrent infohash
-
-        Returns:
-            ContentInfo if found, None otherwise
-        """
         return self.content_registry.get(infohash)
 
     def get_status(self) -> dict:
-        """
-        Get current seeding status
-
-        Returns:
-            Dictionary with status information
-        """
         if not self.handles:
             return {"active": False, "torrents": 0, "peers": 0, "uploaded": 0}
 
@@ -257,15 +190,7 @@ class Seedbox:
         }
 
     def initialize(self) -> None:
-        """
-        Initialize the seedbox session and load torrents.
-
-        Call this before starting the seeding loop or announcer.
-        Populates the content registry for IPV8 broadcasting.
-
-        Raises:
-            SeedboxError: If initialization fails
-        """
+        """Call before starting the seeding loop or announcer. Populates content_registry."""
         logger.info("Initializing seedbox")
         logger.info("Content directory: %s", self.content_dir)
         logger.info("Tracker: %s", self.tracker_url)
@@ -281,12 +206,6 @@ class Seedbox:
         logger.info("Content registry has %d entries", len(self.content_registry))
 
     def run_status_loop(self, status_interval: int = 180) -> None:
-        """
-        Run the seeding status loop (blocking).
-
-        Args:
-            status_interval: Seconds between status updates
-        """
         logger.info("Seeding %d torrents", len(self.handles))
 
         try:
@@ -304,19 +223,9 @@ class Seedbox:
                 logger.info("Stopping seedbox")
 
     def cancel(self) -> None:
-        """Signal the status loop to exit."""
         self._stop_event.set()
 
     def seed_content(self, status_interval: int = 60) -> None:
-        """
-        Initialize and run the main seeding loop.
-
-        Args:
-            status_interval: Seconds between status updates
-
-        Raises:
-            SeedboxError: If initialization fails
-        """
         try:
             self.initialize()
             self.run_status_loop(status_interval)

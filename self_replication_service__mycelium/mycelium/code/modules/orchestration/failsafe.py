@@ -24,7 +24,6 @@ logger = setup_logger(__name__, log_file=Config.LOG_DIR / "orchestrator.log", le
 
 
 def select_best_peer(peers: List[PeerInfo]) -> Optional[PeerInfo]:
-    """Return the most wealthy peer (highest BTC balance)."""
     if not peers:
         return None
     return max(peers, key=lambda p: p.btc_balance_sat)
@@ -66,7 +65,6 @@ async def _sweep_funds(
 
 
 async def execute_failsafe(node_state: NodeState, peers: List[PeerInfo]) -> None:
-    """Transfer this node's BTC balance to the best available peer, with cold wallet fallback."""
     best = select_best_peer(peers)
 
     if best is not None:

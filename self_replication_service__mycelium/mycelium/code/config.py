@@ -7,20 +7,15 @@ from pathlib import Path
 
 
 class Config:
-    """Central configuration for the orchestrator system."""
-
-    # Repository
     REPO_URL: str = os.getenv(
         "MYCELIUM_REPO_URL",
         "https://github.com/Tribler/superorganism-experiment.git"
     )
     REPO_BRANCH: str = os.getenv("MYCELIUM_BRANCH", "main")
 
-    # Timing
     UPDATE_CHECK_INTERVAL: int = int(os.getenv("MYCELIUM_UPDATE_CHECK_INTERVAL", "60"))
     HEARTBEAT_INTERVAL: int = int(os.getenv("MYCELIUM_HEARTBEAT_INTERVAL", "300"))
 
-    # Paths
     BASE_DIR: Path = Path(os.getenv("MYCELIUM_BASE_DIR", "/root/mycelium"))
     LOG_DIR: Path = Path(os.getenv("MYCELIUM_LOG_DIR", "/root/logs"))
     DATA_DIR: Path = Path(os.getenv("MYCELIUM_DATA_DIR", "/root/data"))
@@ -29,22 +24,18 @@ class Config:
     COOKIES_FILE: Path = Path(os.getenv("MYCELIUM_COOKIES_FILE", "/root/yt_cookies.txt"))
     DISK_THRESHOLD: int = int(os.getenv("MYCELIUM_DISK_THRESHOLD", "10"))
 
-    # Node identity
     FRIENDLY_NAME: str = os.getenv("MYCELIUM_FRIENDLY_NAME", "mycelium-node")
     PUBLIC_IP: str = os.getenv("MYCELIUM_PUBLIC_IP", "")
 
-    # Event logging
     LOG_ENDPOINT: str = os.getenv("MYCELIUM_LOG_ENDPOINT", "")
     LOG_SECRET: str = os.getenv("MYCELIUM_LOG_SECRET", "")
     PARENT_NAME: str = os.getenv("MYCELIUM_PARENT_NAME", "genesis")
 
-    # IPV8 / Fleet
     WHOAMI_BROADCAST_INTERVAL: int = int(os.getenv("MYCELIUM_WHOAMI_BROADCAST_INTERVAL", "60"))
     WHOAMI_GOSSIP_COOLDOWN: int = int(os.getenv("MYCELIUM_WHOAMI_GOSSIP_COOLDOWN", "60"))
     PEER_REGISTRY_TTL: int = int(os.getenv("MYCELIUM_PEER_REGISTRY_TTL", "3600"))
     CONTENT_BROADCAST_INTERVAL: int = int(os.getenv("MYCELIUM_CONTENT_BROADCAST_INTERVAL", str(5 * 3600)))
 
-    # Seedbox configuration
     TORRENT_TRACKER: str = os.getenv(
         "MYCELIUM_TRACKER",
         "udp://tracker.opentrackr.org:1337/announce"
@@ -53,7 +44,6 @@ class Config:
     SEEDBOX_PORT_MAX: int = int(os.getenv("MYCELIUM_SEEDBOX_PORT_MAX", "6891"))
     SEEDBOX_STATUS_INTERVAL: int = int(os.getenv("MYCELIUM_SEEDBOX_STATUS_INTERVAL", "300"))
 
-    # Logging configuration
     LOG_LEVEL: str = os.getenv("MYCELIUM_LOG_LEVEL", "INFO")
     LOG_FORMAT: str = "%(asctime)s - %(name)s - %(levelname)s - %(message)s"
 
@@ -63,7 +53,6 @@ class Config:
     BITCOIN_NETWORK: str = os.getenv("MYCELIUM_BITCOIN_NETWORK", "bitcoin")  # mainnet
     DEFAULT_BTC_ADDRESS: str = os.getenv("MYCELIUM_DEFAULT_BTC_ADDRESS", "")
 
-    # Persistent state
     STATE_DB_FILE: Path = DATA_DIR / "state.db"
     INITIAL_CAUTION_TRAIT: float = float(os.getenv("MYCELIUM_CAUTION_TRAIT", "0.5"))
 
@@ -81,7 +70,6 @@ class Config:
     SPAWN_FEE_BUFFER_SAT: int  = int(os.getenv("MYCELIUM_SPAWN_FEE_BUFFER_SAT", "5000"))
     SPORESTACK_MIN_INVOICE_DOLLARS: int = int(os.getenv("MYCELIUM_SPORESTACK_MIN_INVOICE_DOLLARS", "5"))
 
-    # Decision loop
     DECISION_INTERVAL: int     = int(os.getenv("MYCELIUM_DECISION_INTERVAL", "21600")) #6h
     FAILSAFE_TRIGGER_DAYS: int = int(os.getenv("MYCELIUM_FAILSAFE_TRIGGER_DAYS", "2"))
     TOPUP_TRIGGER_DAYS: int    = int(os.getenv("MYCELIUM_TOPUP_TRIGGER_DAYS", "30"))
@@ -96,18 +84,14 @@ class Config:
     SPORESTACK_BASE_URL: str = os.getenv("MYCELIUM_SPORESTACK_BASE_URL", "https://api.sporestack.com").rstrip("/")
 
     # Sim-mode overrides (production: all unset → no behavioural change)
-    # Comma-separated host:port list; when set, replaces ipv8 default_bootstrap_defs.
-    # Critical safety rail in sim: prevents fallback to Tribler defaults, which would
-    # let sim nodes discover real swarm peers (LiberationCommunity ID is shared with prod).
+    # Comma-separated host:port list; replaces ipv8 default_bootstrap_defs when set.
+    # Prevents sim nodes from discovering real swarm peers (LiberationCommunity ID is shared with prod).
     IPV8_BOOTSTRAP: str = os.getenv("MYCELIUM_IPV8_BOOTSTRAP", "")
-    # IPv8 key block (very-low/low/medium/high → sect curves; curve25519 → libnacl).
-    # Default 'medium' (sect409k1) matches prod; sim sets curve25519 because Alpine's
-    # openssl is built without binary EC curves (no-ec2m).
+    # Default 'medium' matches prod; sim uses curve25519 — Alpine's openssl omits binary EC (no-ec2m).
     IPV8_CURVE: str = os.getenv("MYCELIUM_IPV8_CURVE", "medium")
     SIM_MODE: bool = os.getenv("MYCELIUM_SIM_MODE", "").strip().lower() in ("1", "true", "yes")
 
     # Max bytes per orchestrator.log before RotatingFileHandler rolls it over.
-    # Total on-disk footprint per node ≤ 2 × LOG_MAX_BYTES (one active + one backup).
     LOG_MAX_BYTES: int = int(os.getenv(
         "MYCELIUM_LOG_MAX_BYTES",
         str(128 * 1024 if SIM_MODE else 1024 * 1024),
@@ -128,7 +112,6 @@ class Config:
     # against a real feed. Set 0 to exclude wallet from total_runway entirely.
     BTC_USD_RATE: float = float(os.getenv("MYCELIUM_BTC_USD_RATE", "50000"))
 
-    # Exit codes
     EXIT_SUCCESS: int = 0
     EXIT_FAILURE: int = 1
     EXIT_RESTART: int = 42

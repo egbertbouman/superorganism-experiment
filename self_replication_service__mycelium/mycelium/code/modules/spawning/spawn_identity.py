@@ -42,13 +42,13 @@ _MAX_FUNDING_ATTEMPTS = 5
 
 @dataclass
 class ChildIdentity:
-    spawn_id: str               # local spawn ID (passed in)
-    sporestack_token: str       # fresh SporeStack API token
-    ssh_private_key_path: str   # absolute path to id_ed25519
+    spawn_id: str
+    sporestack_token: str
+    ssh_private_key_path: str
     ssh_public_key: str         # full content of id_ed25519.pub
-    btc_mnemonic: str           # child's BIP39 seed
+    btc_mnemonic: str
     btc_address: str            # child's segwit receiving address
-    funded_cents: int           # SporeStack balance observed after funding lands
+    funded_cents: int
 
 
 def _generate_child_btc_wallet(spawn_id: str):
@@ -105,7 +105,6 @@ async def _wait_for_credit(sporestack_token: str) -> int:
 
 
 def _rehydrate_child_wallet(ps, spawn_id: str):
-    """If a matching child-wallet blob was persisted, return (mnemonic, address); else None."""
     blob = ps.get("spawn_child_wallet")
     if not blob or blob.get("spawn_id") != spawn_id:
         return None
@@ -124,7 +123,6 @@ def _rehydrate_sporestack_token(ps, spawn_id: str) -> Optional[str]:
 
 
 def _intent_is_live(intent: dict) -> bool:
-    """An invoice intent is live if its expires timestamp (or fallback) is in the future."""
     expires = intent.get("expires")
     if expires is None:
         created = intent.get("created")
@@ -362,14 +360,12 @@ async def prepare_child_identity(
         })
         logger.info("Minted SporeStack token")
 
-    # 4) Fund the token.
     wallet = get_wallet()
     if wallet is None:
         raise SpawnError("identity", "Parent wallet not initialized")
     await _fund_sporestack_token(ps, spawn_id, sporestack_token, wallet)
 
-    # 5) Poll for credit landing. This is already idempotent — it just reads
-    #    `get_balance` until cents > 0.
+    # 5) Poll for credit landing — idempotent (read-only get_balance loop, no spend).
     funded_cents = await _wait_for_credit(sporestack_token)
 
     return ChildIdentity(

@@ -64,7 +64,6 @@ def _log_intent_summary(ps, spawn_id: str) -> None:
         blob = ps.get(key)
         if blob is None:
             continue
-        # Flat string values (txids) and dict values (intents) both count.
         if isinstance(blob, dict) and blob.get("spawn_id") not in (None, spawn_id):
             continue
         present.append(key)
@@ -90,10 +89,7 @@ async def _safe_disconnect(ssh_deployer) -> None:
 async def spawn_child(node_state: NodeState, caution_trait: float, spawn_id: str) -> bool:
     """Run the full spawn pipeline. Returns True on success, False on failure.
 
-    On failure, leave spawn_in_progress=True for retry. Each durable side-effect
-    (identity minting, VPS provisioning) persists its result to state.db so a restart
-    mid-pipeline can re-enter at the last successful step without re-spending money
-    on fresh SporeStack tokens or orphaning already-provisioned VPSes.
+    On failure, leave spawn_in_progress=True for retry.
     """
     ps = state_module.get()
     if ps is None:
@@ -104,7 +100,6 @@ async def spawn_child(node_state: NodeState, caution_trait: float, spawn_id: str
     logger.info("=== Spawn pipeline start: spawn_id=%s ===", spawn_id)
     _log_intent_summary(ps, spawn_id)
     try:
-        # Step 1: identity (reuse if already minted & funded)
         identity = _load_stored_identity(ps, spawn_id)
         if identity is not None:
             logger.info(
@@ -116,7 +111,6 @@ async def spawn_child(node_state: NodeState, caution_trait: float, spawn_id: str
             identity = await prepare_child_identity(spawn_id, node_state)
             ps.set("spawn_identity", asdict(identity))
 
-        # Step 2: VPS (reuse if already provisioned)
         vps_info = _load_stored_vps(ps, spawn_id)
         if vps_info is not None:
             logger.info(
@@ -134,7 +128,6 @@ async def spawn_child(node_state: NodeState, caution_trait: float, spawn_id: str
         )
         ssh_deployer = await deploy_child_code(identity, vps_info)
 
-        # Step 4: boot orchestrator
         logger.info("[4/5] Booting child orchestrator: spawn_id=%s", spawn_id)
         child_caution = await boot_child_orchestrator(ssh_deployer, identity, caution_trait)
 

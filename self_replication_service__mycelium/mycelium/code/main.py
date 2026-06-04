@@ -1,8 +1,4 @@
-"""
-Autonomous orchestrator main entry point.
-
-Manages the event loop for code synchronization and seedbox operations.
-"""
+"""Autonomous orchestrator main entry point."""
 
 import asyncio
 import os
@@ -41,8 +37,6 @@ def _get_version() -> str:
 
 
 class Orchestrator:
-    """Main orchestrator for autonomous server operations."""
-
     def __init__(self):
         self.running = False
         self.code_sync = None if Config.SIM_MODE else CodeSync(
@@ -61,12 +55,10 @@ class Orchestrator:
         self._setup_signal_handlers()
 
     def _setup_signal_handlers(self) -> None:
-        """Configure handlers for shutdown."""
         signal.signal(signal.SIGTERM, self._handle_shutdown)
         signal.signal(signal.SIGINT, self._handle_shutdown)
 
     def _handle_shutdown(self, signum: int, frame) -> None:
-        """Handle shutdown signals."""
         ps = state_module.get()
         if ps and ps.is_spawn_in_progress():
             spawn_age = time.time() - ps.get_spawn_started_at()
@@ -102,7 +94,6 @@ class Orchestrator:
             task.cancel()
 
     async def check_for_updates(self) -> None:
-        """Periodic task to check for code updates."""
         while self.running:
             try:
                 if self.code_sync.has_updates():
@@ -132,7 +123,6 @@ class Orchestrator:
             await asyncio.sleep(Config.UPDATE_CHECK_INTERVAL)
 
     async def heartbeat(self) -> None:
-        """Periodic heartbeat logging + thesis state_snapshot emission."""
         while self.running:
             registry = peer_registry.get_registry()
             live_peers = registry.get_peer_count() if registry else 0
@@ -162,7 +152,6 @@ class Orchestrator:
             await asyncio.sleep(Config.HEARTBEAT_INTERVAL)
 
     async def download_content_if_needed(self) -> None:
-        """Download content via yt-dlp if content directory is empty."""
         # Check if content already exists (ignore .info.json metadata files)
         content_files = [
             f for f in Config.CONTENT_DIR.iterdir()
@@ -194,7 +183,6 @@ class Orchestrator:
             logger.error("Unexpected content download error: %s", e, exc_info=True)
 
     async def initialize_seedbox(self) -> bool:
-        """Initialize seedbox in executor thread."""
         loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(
@@ -211,7 +199,6 @@ class Orchestrator:
             return False
 
     async def run_seedbox_loop(self) -> None:
-        """Run seedbox status loop in executor thread."""
         loop = asyncio.get_event_loop()
         try:
             await loop.run_in_executor(
@@ -223,7 +210,6 @@ class Orchestrator:
             logger.error("Seedbox loop error: %s", e, exc_info=True)
 
     async def run_torrent_announcer(self) -> None:
-        """Run the IPV8 liberation announcer."""
         try:
             await self.announcer.start()
             await self.announcer.announce_loop(interval=Config.CONTENT_BROADCAST_INTERVAL)
@@ -245,7 +231,6 @@ class Orchestrator:
             await self.announcer.stop()
 
     async def monitor_loop(self) -> None:
-        """Periodically refresh node financial/operational state."""
         monitor = node_monitor.get_monitor()
         if not monitor:
             return
@@ -254,12 +239,10 @@ class Orchestrator:
             await asyncio.sleep(node_monitor.NodeMonitor.REFRESH_INTERVAL)
 
     async def run_decision_loop(self) -> None:
-        """Run the autonomous decision loop (spawn / failsafe / topup / do-nothing)."""
         from modules.orchestration.decision_loop import run as decision_run
         await decision_run(lambda: self.running)
 
     async def run_seedbox_info_announcer(self) -> None:
-        """Run the seedbox info broadcast loop (waits for community init)."""
         logger.info("Waiting for community to initialize...")
         # Wait until the announcer has initialized the community
         wait_count = 0
@@ -280,7 +263,6 @@ class Orchestrator:
             logger.error("Seedbox info announcer error: %s", e, exc_info=True)
 
     async def run(self) -> None:
-        """Main orchestrator loop."""
         self.running = True
         logger.info("Orchestrator starting")
         logger.info("Repository: %s", Config.REPO_URL)
@@ -291,7 +273,6 @@ class Orchestrator:
         if Config.SIM_MODE:
             logger.info("SIM_MODE enabled — skipping seeding subsystem (download / seedbox / torrent announcer)")
         else:
-            # Download content if needed (one-time, before seedbox)
             await self.download_content_if_needed()
 
             # Initialize seedbox first (blocking) so content is available for announcer
@@ -327,12 +308,6 @@ class Orchestrator:
 
 
 def main() -> int:
-    """
-    Application entry point.
-
-    Returns:
-        Exit code
-    """
     try:
         Config.validate()
 

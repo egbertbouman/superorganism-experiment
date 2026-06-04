@@ -1,9 +1,3 @@
-"""
-Git synchronization.
-
-Checks repository for changes and automatically updates.
-"""
-
 import subprocess
 from pathlib import Path
 from typing import Optional
