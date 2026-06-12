@@ -8,13 +8,7 @@ libtorrent>=2.0.11
 pyipv8==3.1.0
 pyside6
 matplotlib
-
-# Crowdsourced learn-to-rank experiments (see
-# crowdsourced_learn_to_rank/ltr-benchmarking/). numpy + scikit-learn
-# are used for dataset loading and metric computation; lightgbm and
-# xgboost are required only if you train or load those model types
-# (PDGD and LINEAR are pure-numpy).
-numpy
+numpy<2.0
 scikit-learn
 lightgbm
 xgboost
