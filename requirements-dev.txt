@@ -1,3 +1,4 @@
 black
 dotenv
 pytest
+pytest-cov
