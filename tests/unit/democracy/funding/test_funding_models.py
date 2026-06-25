@@ -59,6 +59,18 @@ def test_funding_campaign_allows_inactive_zero_price_campaign() -> None:
     assert campaign.deadline_height is None
 
 
+def test_funding_campaign_normalizes_blank_payout_address_to_none() -> None:
+    campaign = FundingCampaign(
+        solution_id=UUID("00000000-0000-0000-0000-000000000002"),
+        solution_hash="ab" * 32,
+        developer_payout_address="   ",
+        asking_price_sats=0,
+        deadline_height=None,
+    )
+
+    assert campaign.developer_payout_address is None
+
+
 def test_funding_campaign_rejects_payout_address_for_zero_price_campaign() -> None:
     with pytest.raises(
         ValueError,
@@ -70,6 +82,34 @@ def test_funding_campaign_rejects_payout_address_for_zero_price_campaign() -> No
             developer_payout_address="bcrt1qexampleaddress",
             asking_price_sats=0,
             deadline_height=None,
+        )
+
+
+def test_funding_campaign_rejects_deadline_for_zero_price_campaign() -> None:
+    with pytest.raises(
+        ValueError,
+        match="deadline_height must be omitted when asking_price_sats is 0",
+    ):
+        FundingCampaign(
+            solution_id=UUID("00000000-0000-0000-0000-000000000002"),
+            solution_hash="ab" * 32,
+            developer_payout_address=None,
+            asking_price_sats=0,
+            deadline_height=20,
+        )
+
+
+def test_funding_campaign_rejects_missing_payout_for_positive_price_campaign() -> None:
+    with pytest.raises(
+        ValueError,
+        match="developer_payout_address is required when asking_price_sats is positive",
+    ):
+        FundingCampaign(
+            solution_id=UUID("00000000-0000-0000-0000-000000000002"),
+            solution_hash="ab" * 32,
+            developer_payout_address=None,
+            asking_price_sats=10,
+            deadline_height=20,
         )
 
 
@@ -158,6 +198,25 @@ def test_compute_campaign_commitment_hex_rejects_inactive_campaign() -> None:
         campaign.compute_campaign_commitment_hex(b"regtest")
 
 
+def test_compute_campaign_commitment_hex_rejects_inconsistent_active_campaign_state() -> (
+    None
+):
+    campaign = FundingCampaign(
+        solution_id=UUID("00000000-0000-0000-0000-000000000002"),
+        solution_hash="ab" * 32,
+        developer_payout_address="bcrt1qexampleaddress",
+        asking_price_sats=10,
+        deadline_height=20,
+    )
+    object.__setattr__(campaign, "developer_payout_address", None)
+
+    with pytest.raises(
+        ValueError,
+        match="Active campaigns must define payout address and deadline",
+    ):
+        campaign.compute_campaign_commitment_hex(b"regtest")
+
+
 # =========================================================
 # FundingPledge
 # =========================================================
@@ -200,4 +259,29 @@ def test_funding_pledge_rejects_invalid_signed_pledge_psbt(
             vout=0,
             value_sats=1,
             signed_pledge_psbt=signed_pledge_psbt,
+        )
+
+
+@pytest.mark.parametrize("value_sats", [0, -1])
+def test_funding_pledge_rejects_non_positive_value_sats(value_sats: int) -> None:
+    with pytest.raises(ValueError, match="value_sats must be positive"):
+        FundingPledge(
+            campaign_id=UUID("00000000-0000-0000-0000-000000000001"),
+            pledger_id=UUID("00000000-0000-0000-0000-000000000002"),
+            txid="ab" * 32,
+            vout=0,
+            value_sats=value_sats,
+            signed_pledge_psbt="cHNidP8BAAoCAAAAAQ==",
+        )
+
+
+def test_funding_pledge_rejects_negative_vout() -> None:
+    with pytest.raises(ValueError, match="vout must be non-negative"):
+        FundingPledge(
+            campaign_id=UUID("00000000-0000-0000-0000-000000000001"),
+            pledger_id=UUID("00000000-0000-0000-0000-000000000002"),
+            txid="ab" * 32,
+            vout=-1,
+            value_sats=1,
+            signed_pledge_psbt="cHNidP8BAAoCAAAAAQ==",
         )
