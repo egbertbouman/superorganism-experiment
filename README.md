@@ -137,10 +137,19 @@ scripts/regtest.sh sign-psbt <psbt_base64>
 
 ## Mycelium
 
-Autonomous VPS provisioning system using Bitcoin payments and SporeStack API. Deploys Mycelium a BitTorrent seedbox orchestrator for Creative Commons content.
-
-### What it does
+Autonomous VPS provisioning system using Bitcoin payments and SporeStack API. Deploys Mycelium a BitTorrent seedbox orchestrator for Creative Commons content. What it does:
 
 - Seeds content via BitTorrent (libtorrent)
 - Auto-updates from GitHub and restarts on changes
 - Broadcasts seeded content to IPV8 peers for health monitoring
+
+## Democracy
+
+- Various [overlay messages for vote exchange and object synchronization](https://github.com/Tribler/superorganism-experiment/blob/cb8a76c1a21a7cd99c5246a50c77f8aba3fbe343/democracy/network/community.py)
+- Software developers get paid for [pull request using Bitcoin](https://github.com/Tribler/superorganism-experiment/blob/cb8a76c1a21a7cd99c5246a50c77f8aba3fbe343/democracy/funding/service.py#L17) with special commitments flags ALL|ANYONECANPAY.
+- local SQLite is used for [simple local storage](https://github.com/Tribler/superorganism-experiment/blob/cb8a76c1a21a7cd99c5246a50c77f8aba3fbe343/democracy/storage/sqlite_repository.py)
+
+## Survivalrank
+
+- Different learn-to-rank models are [deployed in the network](https://github.com/Tribler/superorganism-experiment/blob/cb8a76c1a21a7cd99c5246a50c77f8aba3fbe343/crowdsourced_learn_to_rank/ltr-benchmarking/ltr_evaluator.py#L163) and performance score is determined (NDCG)
+- decentralized [multie-arm bandit](https://github.com/Tribler/superorganism-experiment/blob/cb8a76c1a21a7cd99c5246a50c77f8aba3fbe343/crowdsourced_learn_to_rank/ltr-benchmarking/mab.py) ensures survival-of-the-fittest and cleaning of low-performance variants.
