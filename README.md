@@ -7,8 +7,15 @@ Our work contains several novelties:
 - ⚡ Trust. First trust framework and true Peer-to-Peer agent communication fabric. No DNS, no central control.
 - 🧑‍🚒 AI models in a real-time competition for survival of the fittest using multi-arm-bandit and model score gossip.
 - 👓 Find information using decentralized relevance ranking
-- 🥇 First decentralized voting system. Your place, your control, your vote. Our vibe coded demo we're implementing [with real crypto](https://arxiv.org/pdf/2507.09453).
+- 🥇 First decentralized voting system. Your place, your control, your vote.
 - 🥼 User-driven self-evolution. The emergent voting behavior is that users drive the roadmap using democracy. No lawyer or company can stop the will of the people.
+
+## Towards recursive self-improving AI
+
+Our superorganism is an _exploratory_ experiment for self-hosted and self-improving systems under direct human control.
+It is a decentralized system ability to create seedboxes, vote on systems changes, and donate GPU resources for decentralised AI. It runs on our machines, but it's complex stuff. Frontpage Screenshot with torrent management, self-replicating server fleet overview, voting part, and autoresearch (viewing page).
+
+![Superorganism Eternal Autoresearch](https://github.com/user-attachments/assets/b43da39a-4155-48b6-9b62-451897f61fa2)
 
 ![demo_of_democratic_voting_process](https://github.com/user-attachments/assets/c5881768-71df-4a82-8f7b-ad3c02a64ceb)
 
